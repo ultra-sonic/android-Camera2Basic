@@ -32,12 +32,20 @@
         android:layout_alignParentStart="true"
         android:background="@color/control_background">
 
+      <!--  <Button
+            android:id="@+id/connect"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="left|center"
+            android:text="@string/connect" />-->
+
         <Button
             android:id="@+id/picture"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
             android:text="@string/picture" />
+
 
         <ImageButton
             android:id="@+id/info"

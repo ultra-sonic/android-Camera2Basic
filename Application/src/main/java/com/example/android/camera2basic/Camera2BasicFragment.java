@@ -41,6 +41,7 @@ import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.media.ImageReader;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -59,14 +60,20 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Toast;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.net.Socket;
+import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -295,6 +302,7 @@ public class Camera2BasicFragment extends Fragment
                 case STATE_WAITING_LOCK: {
                     Integer afState = result.get(CaptureResult.CONTROL_AF_STATE);
                     if (afState == null) {
+                        mState = STATE_PICTURE_TAKEN;
                         captureStillPicture();
                     } else if (CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED == afState ||
                             CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED == afState) {
@@ -410,7 +418,10 @@ public class Camera2BasicFragment extends Fragment
             return Collections.max(notBigEnough, new CompareSizesByArea());
         } else {
             Log.e(TAG, "Couldn't find any suitable preview size");
-            return choices[0];
+            if (choices.length>=12)
+                return choices[12]; // dirty hack to return 1920x1080 on Zenfone AR
+            else
+                return choices[0];
         }
     }
 
@@ -431,11 +442,11 @@ public class Camera2BasicFragment extends Fragment
         mTextureView = (AutoFitTextureView) view.findViewById(R.id.texture);
     }
 
-    @Override
-    public void onActivityCreated(Bundle savedInstanceState) {
-        super.onActivityCreated(savedInstanceState);
-        mFile = new File(getActivity().getExternalFilesDir(null), "pic.jpg");
-    }
+//    @Override
+//    public void onActivityCreated(Bundle savedInstanceState) {
+//        super.onActivityCreated(savedInstanceState);
+//        mFile = new File(getActivity().getExternalFilesDir(null), "pic.jpg");
+//    }
 
     @Override
     public void onResume() {
@@ -704,9 +715,13 @@ public class Camera2BasicFragment extends Fragment
                             try {
                                 // Auto focus should be continuous for camera preview.
                                 mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
-                                        CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+                                        CaptureRequest.CONTROL_AF_MODE_AUTO); // CONTROL_AF_MODE_CONTINUOUS_PICTURE
+                                // mPreviewRequestBuilder.set(
+                                //        CaptureRequest.LENS_FOCUS_DISTANCE, 0.5f); // 0f sets focus to infinity
+
                                 // Flash is automatically enabled when necessary.
-                                setAutoFlash(mPreviewRequestBuilder);
+                                // setAutoFlash(mPreviewRequestBuilder);
+                                // setFlashOff(mPreviewRequestBuilder);
 
                                 // Finally, we start displaying the camera preview.
                                 mPreviewRequest = mPreviewRequestBuilder.build();
@@ -779,11 +794,17 @@ public class Camera2BasicFragment extends Fragment
                     CameraMetadata.CONTROL_AF_TRIGGER_START);
             // Tell #mCaptureCallback to wait for the lock.
             mState = STATE_WAITING_LOCK;
+
             mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
                     mBackgroundHandler);
+
         } catch (CameraAccessException e) {
             e.printStackTrace();
+        } catch (NullPointerException e) {
+
+            e.printStackTrace();
         }
+
     }
 
     /**
@@ -808,6 +829,8 @@ public class Camera2BasicFragment extends Fragment
      * Capture a still picture. This method should be called when we get a response in
      * {@link #mCaptureCallback} from both {@link #lockFocus()}.
      */
+    private float exposureTime=0.25f;
+
     private void captureStillPicture() {
         try {
             final Activity activity = getActivity();
@@ -816,13 +839,17 @@ public class Camera2BasicFragment extends Fragment
             }
             // This is the CaptureRequest.Builder that we use to take a picture.
             final CaptureRequest.Builder captureBuilder =
-                    mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+                    mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_MANUAL);
             captureBuilder.addTarget(mImageReader.getSurface());
 
             // Use the same AE and AF modes as the preview.
             captureBuilder.set(CaptureRequest.CONTROL_AF_MODE,
                     CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
-            setAutoFlash(captureBuilder);
+
+
+            // setAutoFlash(captureBuilder);
+            setManualMode(captureBuilder);
+            setExposureTime(captureBuilder, exposureTime);
 
             // Orientation
             int rotation = activity.getWindowManager().getDefaultDisplay().getRotation();
@@ -835,9 +862,12 @@ public class Camera2BasicFragment extends Fragment
                 public void onCaptureCompleted(@NonNull CameraCaptureSession session,
                                                @NonNull CaptureRequest request,
                                                @NonNull TotalCaptureResult result) {
-                    showToast("Saved: " + mFile);
+                    // showToast("Saved: " + mFile);
                     Log.d(TAG, mFile.toString());
-                    unlockFocus();
+
+                    backToPreviewState(); // this was unlockFocus before but we just need to go back to preview state so I split it up to 2 functions
+                    // unlockFocus(); // needed to uncomment this because we shoot a sequence and
+                    // therfore need the focus to stay the same
                 }
             };
 
@@ -867,12 +897,13 @@ public class Camera2BasicFragment extends Fragment
      * Unlock the focus. This method should be called when still image capture sequence is
      * finished.
      */
-    private void unlockFocus() {
+    private void backToPreviewState() {
         try {
-            // Reset the auto-focus trigger
+            // keep focus locked!!!
+            // This is how to tell the camera to lock focus.
             mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
-                    CameraMetadata.CONTROL_AF_TRIGGER_CANCEL);
-            setAutoFlash(mPreviewRequestBuilder);
+                    CameraMetadata.CONTROL_AF_TRIGGER_IDLE);
+
             mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
                     mBackgroundHandler);
             // After this, the camera will go back to the normal state of preview.
@@ -884,11 +915,31 @@ public class Camera2BasicFragment extends Fragment
         }
     }
 
+    private void unlockFocus() {
+        try {
+            // Reset the auto-focus trigger
+            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
+                    CameraMetadata.CONTROL_AF_TRIGGER_CANCEL);
+
+            mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
+                    mBackgroundHandler);
+            // After this, the camera will go back to the normal state of preview.
+            mState = STATE_PREVIEW;
+            mCaptureSession.setRepeatingRequest(mPreviewRequest, mCaptureCallback,
+                    mBackgroundHandler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+
+
+
     @Override
     public void onClick(View view) {
         switch (view.getId()) {
             case R.id.picture: {
-                takePicture();
+                new initiateRemoteControlFromPi().execute("");
                 break;
             }
             case R.id.info: {
@@ -904,12 +955,149 @@ public class Camera2BasicFragment extends Fragment
         }
     }
 
+    public static String getCurrentTimeStamp() {
+        SimpleDateFormat sdfDate = new SimpleDateFormat("yyyyMMddHHmmss");//dd/MM/yyyy
+        Date now = new Date();
+        String strDate = sdfDate.format(now);
+        return strDate;
+    }
+
+    /**
+     * count from 0 for every lightstage capture session
+     */
+
+    private static DataOutputStream lightstageOutStream = null;
+    private static DataInputStream lightstageInputStream = null;
+    private int pictureCounter=0;
+    private String pictureSession;
+
+    private class initiateRemoteControlFromPi extends AsyncTask<String, Void, String> {
+        @Override
+        protected String doInBackground(String... params) {
+            //String hostname = "192.168.9.126";
+            //String hostname = "192.168.43.123";
+            String hostname = "lightstage";
+            Socket clientSocket = null;
+
+            pictureSession = getCurrentTimeStamp();
+            pictureCounter=0;
+
+            try {
+                try {
+                    clientSocket = new Socket(hostname, 50007);
+                    }
+                catch (UnknownHostException e) {
+                    System.err.println("Don't know about host: " + hostname + " trying airowski for devel");
+                    hostname = "airowski";
+                    clientSocket = new Socket(hostname, 50007);
+                }
+                lightstageOutStream = new DataOutputStream(clientSocket.getOutputStream());
+                lightstageInputStream = new DataInputStream(clientSocket.getInputStream());
+
+                // Send first message
+                lightstageOutStream.writeByte(1); // INIT LIGHTSTAGE
+                //os.writeUTF("This message.");
+                lightstageOutStream.flush(); // Send off the data
+
+                Log.d(TAG, "waiting for lightstage");
+                while (true) {
+                    int command = lightstageInputStream.readByte();
+                    if (command == 2) {
+//                        runOnUiThread(takePictureRunnable);
+                        mFile = new File(getActivity().getExternalFilesDir(null), pictureSession + "_" + String.format("%04d", pictureCounter) + ".jpg");
+
+                        //exposureTime=0.1f;
+
+                        try {
+                            takePicture();
+                        }
+                        catch (Exception e) {
+                            e.printStackTrace();
+                            Log.d(TAG, "something went wrong during takePicture");
+                            try {
+                                lightstageOutStream.writeByte(-2);
+                            }
+                            catch (IOException e1) {
+                                e1.printStackTrace();
+                            }
+                        }
+                        //exposureTime=0.2f; // bracketing
+                        //takePicture();
+
+
+                        Log.d( TAG, "taking picture" + String.format("%04d", pictureCounter));
+                        pictureCounter++;
+//                        runnable.setData("took picture");
+//                        runOnUiThread(runnable);
+                    } else if (command == -1) {
+                        unlockFocus();
+                        lightstageInputStream.close();
+                        lightstageOutStream.close();
+                        clientSocket.close(); // close is the preferred way over shutdown
+                        Log.d( TAG,"clean exit");
+                        return null;
+                    }
+                }
+
+
+            } catch (UnknownHostException e) {
+                System.err.println("Don't know about host: " + hostname);
+            } catch (IOException e) {
+                System.err.println("Couldn't get I/O for the connection to: " + hostname);
+                System.err.println(e);
+
+            }
+//            TextView txt = (TextView) findViewById(R.id.output);
+//            txt.setText("Executed");
+            return null;
+        }
+    }
+
+
     private void setAutoFlash(CaptureRequest.Builder requestBuilder) {
         if (mFlashSupported) {
             requestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
                     CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
         }
     }
+
+    private void setManualMode(CaptureRequest.Builder requestBuilder) {
+
+        requestBuilder.set(
+                CaptureRequest.CONTROL_MODE,
+                CaptureRequest.CONTROL_MODE_OFF);
+
+//
+//            requestBuilder.set(
+//                    CaptureRequest.CONTROL_AE_MODE,
+//                    CaptureRequest.CONTROL_AE_MODE_OFF);
+        requestBuilder.set(
+                CaptureRequest.FLASH_MODE,
+                CaptureRequest.FLASH_MODE_OFF);
+        requestBuilder.set(
+                CaptureRequest.CONTROL_AWB_MODE,
+                CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT);
+
+        requestBuilder.set(
+                CaptureRequest.SENSOR_SENSITIVITY,
+                400);
+
+//        requestBuilder.set(
+//                CaptureRequest.LENS_FOCUS_DISTANCE,
+//                0.1f); // sets focus to infinity
+
+
+
+    }
+
+    private void setExposureTime(CaptureRequest.Builder requestBuilder, float exposureTimeInSeconds) {
+        requestBuilder.set(
+        CaptureRequest.SENSOR_EXPOSURE_TIME,
+                // (long) exposureTimeInSeconds*1000000000 ); // 500000000L = 0.5 seconds
+                500000000L);
+    }
+
+
 
     /**
      * Saves a JPEG {@link Image} into the specified {@link File}.
@@ -935,12 +1123,20 @@ public class Camera2BasicFragment extends Fragment
             ByteBuffer buffer = mImage.getPlanes()[0].getBuffer();
             byte[] bytes = new byte[buffer.remaining()];
             buffer.get(bytes);
+
             FileOutputStream output = null;
+
             try {
                 output = new FileOutputStream(mFile);
                 output.write(bytes);
             } catch (IOException e) {
                 e.printStackTrace();
+                Log.d(TAG, "something went wrong during file save");
+                try {
+                    lightstageOutStream.writeByte(-2);
+                } catch (IOException e1) {
+                    e1.printStackTrace();
+                }
             } finally {
                 mImage.close();
                 if (null != output) {
@@ -951,6 +1147,16 @@ public class Camera2BasicFragment extends Fragment
                     }
                 }
             }
+            if (lightstageOutStream!=null)
+                try {
+                    Log.d(TAG, "signaling lightstage to continue");
+                    lightstageOutStream.writeByte(3);
+
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            else
+                Log.e(TAG, "lightstage Outputstream not available");
         }
 
     }
@@ -1033,4 +1239,6 @@ public class Camera2BasicFragment extends Fragment
         }
     }
 
+    private class tellPiToShoot {
+    }
 }
