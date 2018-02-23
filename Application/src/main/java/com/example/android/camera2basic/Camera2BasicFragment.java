@@ -714,10 +714,16 @@ public class Camera2BasicFragment extends Fragment
                             mCaptureSession = cameraCaptureSession;
                             try {
                                 // Auto focus should be continuous for camera preview.
-                                mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+                                mPreviewRequestBuilder.set(
+                                        CaptureRequest.CONTROL_AF_MODE,
                                         CaptureRequest.CONTROL_AF_MODE_AUTO); // CONTROL_AF_MODE_CONTINUOUS_PICTURE
                                 // mPreviewRequestBuilder.set(
                                 //        CaptureRequest.LENS_FOCUS_DISTANCE, 0.5f); // 0f sets focus to infinity
+
+                                mPreviewRequestBuilder.set(
+                                        CaptureRequest.CONTROL_AWB_MODE,
+                                        CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT );
+
 
                                 // Flash is automatically enabled when necessary.
                                 // setAutoFlash(mPreviewRequestBuilder);
@@ -784,16 +790,29 @@ public class Camera2BasicFragment extends Fragment
         lockFocus();
     }
 
+    private static boolean KEEP_FOCUS_LOCKED = false;
+
     /**
      * Lock the focus as the first step for a still image capture.
      */
     private void lockFocus() {
         try {
-            // This is how to tell the camera to lock focus.
-            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
-                    CameraMetadata.CONTROL_AF_TRIGGER_START);
-            // Tell #mCaptureCallback to wait for the lock.
-            mState = STATE_WAITING_LOCK;
+            if (KEEP_FOCUS_LOCKED) {
+                Log.d(TAG, "keeping focus - no locking");
+                // This is how to tell the camera to lock focus.
+                mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
+                        CameraMetadata.CONTROL_AF_TRIGGER_IDLE);
+                mState = STATE_WAITING_NON_PRECAPTURE;// STATE_WAITING_PRECAPTURE;
+            }
+            else {
+                // This is how to tell the camera to lock focus.
+                Log.d(TAG, "locking focus");
+                mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
+                        CameraMetadata.CONTROL_AF_TRIGGER_START);
+                // Tell #mCaptureCallback to wait for the lock.
+                mState = STATE_WAITING_LOCK;
+            }
+
 
             mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
                     mBackgroundHandler);
@@ -839,7 +858,7 @@ public class Camera2BasicFragment extends Fragment
             }
             // This is the CaptureRequest.Builder that we use to take a picture.
             final CaptureRequest.Builder captureBuilder =
-                    mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_MANUAL);
+                    mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
             captureBuilder.addTarget(mImageReader.getSurface());
 
             // Use the same AE and AF modes as the preview.
@@ -900,8 +919,9 @@ public class Camera2BasicFragment extends Fragment
     private void backToPreviewState() {
         try {
             // keep focus locked!!!
-            // This is how to tell the camera to lock focus.
-            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
+            // This is how to tell the camera to keep the focus locked.
+            mPreviewRequestBuilder.set(
+                    CaptureRequest.CONTROL_AF_TRIGGER,
                     CameraMetadata.CONTROL_AF_TRIGGER_IDLE);
 
             mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
@@ -999,6 +1019,7 @@ public class Camera2BasicFragment extends Fragment
                 //os.writeUTF("This message.");
                 lightstageOutStream.flush(); // Send off the data
 
+
                 Log.d(TAG, "waiting for lightstage");
                 while (true) {
                     int command = lightstageInputStream.readByte();
@@ -1010,6 +1031,7 @@ public class Camera2BasicFragment extends Fragment
 
                         try {
                             takePicture();
+                            KEEP_FOCUS_LOCKED=true;
                         }
                         catch (Exception e) {
                             e.printStackTrace();
@@ -1031,6 +1053,7 @@ public class Camera2BasicFragment extends Fragment
 //                        runOnUiThread(runnable);
                     } else if (command == -1) {
                         unlockFocus();
+                        KEEP_FOCUS_LOCKED = false;
                         lightstageInputStream.close();
                         lightstageOutStream.close();
                         clientSocket.close(); // close is the preferred way over shutdown
@@ -1074,17 +1097,23 @@ public class Camera2BasicFragment extends Fragment
         requestBuilder.set(
                 CaptureRequest.FLASH_MODE,
                 CaptureRequest.FLASH_MODE_OFF);
+
         requestBuilder.set(
-                CaptureRequest.CONTROL_AWB_MODE,
-                CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT);
+                CaptureRequest.CONTROL_AF_TRIGGER,
+                CameraMetadata.CONTROL_AF_TRIGGER_IDLE);
 
         requestBuilder.set(
                 CaptureRequest.SENSOR_SENSITIVITY,
                 400);
 
+        //Set the JPEG quality here like so
+        requestBuilder.set(
+                CaptureRequest.JPEG_QUALITY,
+                (byte)100);
+
 //        requestBuilder.set(
 //                CaptureRequest.LENS_FOCUS_DISTANCE,
-//                0.1f); // sets focus to infinity
+//                0.1f); // 0.0f sets focus to infinity
 
 
 
