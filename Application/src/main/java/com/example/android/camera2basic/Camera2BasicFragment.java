@@ -987,7 +987,9 @@ public class Camera2BasicFragment extends Fragment
      */
 
     private static DataOutputStream lightstageOutStream = null;
+    private static DataOutputStream pmdOutStream = null;
     private static DataInputStream lightstageInputStream = null;
+    private static DataInputStream pmdInputStream = null;
     private int pictureCounter=0;
     private String pictureSession;
 
@@ -997,30 +999,45 @@ public class Camera2BasicFragment extends Fragment
             //String hostname = "192.168.9.126";
             //String hostname = "192.168.43.123";
             String hostname = "lightstage";
-            Socket clientSocket = null;
+            Socket lightstageClientSocket = null;
+            int lightStagePort=50007;
+            Socket pmdClientSocket = null;
+            int pmdStagePort=50008;
 
             pictureSession = getCurrentTimeStamp();
             pictureCounter=0;
 
             try {
                 try {
-                    clientSocket = new Socket(hostname, 50007);
+                    lightstageClientSocket = new Socket(hostname, lightStagePort);
+                    pmdClientSocket = new Socket(hostname, pmdStagePort);
                     }
                 catch (UnknownHostException e) {
                     System.err.println("Don't know about host: " + hostname + " trying airowski for devel");
-                    hostname = "airowski";
-                    clientSocket = new Socket(hostname, 50007);
+                    hostname = "192.168.9.61";
+                    hostname =  "airowski";
+                    try {
+                        lightstageClientSocket = new Socket(hostname, lightStagePort);
+                        pmdClientSocket = new Socket(hostname, pmdStagePort);
+                    }
+                    catch (UnknownHostException e1) {
+                        System.err.println("Don't know about host: " + hostname );
+                    }
+
                 }
-                lightstageOutStream = new DataOutputStream(clientSocket.getOutputStream());
-                lightstageInputStream = new DataInputStream(clientSocket.getInputStream());
+                lightstageOutStream = new DataOutputStream(lightstageClientSocket.getOutputStream());
+                pmdOutStream = new DataOutputStream(pmdClientSocket.getOutputStream());
+                lightstageInputStream = new DataInputStream(lightstageClientSocket.getInputStream());
+                pmdInputStream = new DataInputStream(pmdClientSocket.getInputStream());
 
                 // Send first message
                 lightstageOutStream.writeByte(1); // INIT LIGHTSTAGE
-                //os.writeUTF("This message.");
+                pmdOutStream.writeByte(1); // INIT LIGHTSTAGE
                 lightstageOutStream.flush(); // Send off the data
+                pmdOutStream.flush(); // Send off the data
 
 
-                Log.d(TAG, "waiting for lightstage");
+                Log.d(TAG, "waiting for lightstage & pmd");
                 while (true) {
                     int command = lightstageInputStream.readByte();
                     if (command == 2) {
@@ -1056,7 +1073,7 @@ public class Camera2BasicFragment extends Fragment
                         KEEP_FOCUS_LOCKED = false;
                         lightstageInputStream.close();
                         lightstageOutStream.close();
-                        clientSocket.close(); // close is the preferred way over shutdown
+                        lightstageClientSocket.close(); // close is the preferred way over shutdown
                         Log.d( TAG,"clean exit");
                         return null;
                     }
