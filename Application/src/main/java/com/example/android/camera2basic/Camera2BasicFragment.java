@@ -1015,7 +1015,7 @@ public class Camera2BasicFragment extends Fragment
                 catch (UnknownHostException e) {
                     System.err.println("Don't know about host: " + hostname + " trying airowski for devel");
                     hostname = "192.168.9.61";
-                    hostname =  "airowski";
+                    //hostname =  "airowski";
                     try {
                         lightstageClientSocket = new Socket(hostname, lightStagePort);
                         pmdClientSocket = new Socket(hostname, pmdStagePort);
