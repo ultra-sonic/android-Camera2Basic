@@ -1002,7 +1002,7 @@ public class Camera2BasicFragment extends Fragment
             Socket lightstageClientSocket = null;
             int lightStagePort=50007;
             Socket pmdClientSocket = null;
-            int pmdStagePort=50008;
+            int pmdPort=50008;
 
             pictureSession = getCurrentTimeStamp();
             pictureCounter=0;
@@ -1010,7 +1010,7 @@ public class Camera2BasicFragment extends Fragment
             try {
                 try {
                     lightstageClientSocket = new Socket(hostname, lightStagePort);
-                    pmdClientSocket = new Socket(hostname, pmdStagePort);
+                    pmdClientSocket = new Socket(hostname, pmdPort);
                     }
                 catch (UnknownHostException e) {
                     System.err.println("Don't know about host: " + hostname + " trying airowski for devel");
@@ -1018,7 +1018,7 @@ public class Camera2BasicFragment extends Fragment
                     //hostname =  "airowski";
                     try {
                         lightstageClientSocket = new Socket(hostname, lightStagePort);
-                        pmdClientSocket = new Socket(hostname, pmdStagePort);
+                        pmdClientSocket = new Socket(hostname, pmdPort);
                     }
                     catch (UnknownHostException e1) {
                         System.err.println("Don't know about host: " + hostname );
@@ -1028,11 +1028,11 @@ public class Camera2BasicFragment extends Fragment
                 lightstageOutStream = new DataOutputStream(lightstageClientSocket.getOutputStream());
                 pmdOutStream = new DataOutputStream(pmdClientSocket.getOutputStream());
                 lightstageInputStream = new DataInputStream(lightstageClientSocket.getInputStream());
-                pmdInputStream = new DataInputStream(pmdClientSocket.getInputStream());
+//                pmdInputStream = new DataInputStream(pmdClientSocket.getInputStream());
 
                 // Send first message
                 lightstageOutStream.writeByte(1); // INIT LIGHTSTAGE
-                pmdOutStream.writeByte(1); // INIT LIGHTSTAGE
+                pmdOutStream.writeByte(1); // INIT PMD
                 lightstageOutStream.flush(); // Send off the data
                 pmdOutStream.flush(); // Send off the data
 
@@ -1055,6 +1055,7 @@ public class Camera2BasicFragment extends Fragment
                             Log.d(TAG, "something went wrong during takePicture");
                             try {
                                 lightstageOutStream.writeByte(-2);
+                                pmdOutStream.writeByte(-2);
                             }
                             catch (IOException e1) {
                                 e1.printStackTrace();
@@ -1071,8 +1072,11 @@ public class Camera2BasicFragment extends Fragment
                     } else if (command == -1) {
                         unlockFocus();
                         KEEP_FOCUS_LOCKED = false;
+                        pmdOutStream.writeByte(-1);
                         lightstageInputStream.close();
+//                        pmdInputStream.close();
                         lightstageOutStream.close();
+                        pmdOutStream.close();
                         lightstageClientSocket.close(); // close is the preferred way over shutdown
                         Log.d( TAG,"clean exit");
                         return null;
