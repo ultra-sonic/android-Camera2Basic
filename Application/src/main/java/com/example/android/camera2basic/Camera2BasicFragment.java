@@ -998,14 +998,13 @@ public class Camera2BasicFragment extends Fragment
         protected String doInBackground(String... params) {
             //String hostname = "192.168.9.126";
             //String hostname = "192.168.43.123";
-            String hostname = "lightstage";
+            String hostname = "lightstage"; // TODO: put hostname into UI - and remember the last one used
             Socket lightstageClientSocket = null;
             int lightStagePort=50007;
             Socket pmdClientSocket = null;
             int pmdPort=50008;
 
-            pictureSession = getCurrentTimeStamp();
-            pictureCounter=0;
+
 
             try {
                 try {
@@ -1028,7 +1027,7 @@ public class Camera2BasicFragment extends Fragment
                 lightstageOutStream = new DataOutputStream(lightstageClientSocket.getOutputStream());
                 pmdOutStream = new DataOutputStream(pmdClientSocket.getOutputStream());
                 lightstageInputStream = new DataInputStream(lightstageClientSocket.getInputStream());
-//                pmdInputStream = new DataInputStream(pmdClientSocket.getInputStream());
+                pmdInputStream = new DataInputStream(pmdClientSocket.getInputStream());
 
                 // Send first message
                 lightstageOutStream.writeByte(1); // INIT LIGHTSTAGE
@@ -1036,8 +1035,16 @@ public class Camera2BasicFragment extends Fragment
                 lightstageOutStream.flush(); // Send off the data
                 pmdOutStream.flush(); // Send off the data
 
-
                 Log.d(TAG, "waiting for lightstage & pmd");
+
+                // wait for pmd to answer
+                if (pmdInputStream.readByte()==1) { // INIT PMD
+                    Log.d(TAG, "pico ready!");
+                }
+                pictureSession = getCurrentTimeStamp();
+                Log.d(TAG, "timestamp: " + pictureSession );
+                pictureCounter=0;
+
                 while (true) {
                     int command = lightstageInputStream.readByte();
                     if (command == 2) {
