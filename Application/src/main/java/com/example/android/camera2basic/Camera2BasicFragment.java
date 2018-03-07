@@ -1080,6 +1080,21 @@ public class Camera2BasicFragment extends Fragment
                         unlockFocus();
                         KEEP_FOCUS_LOCKED = false;
                         pmdOutStream.writeByte(-1);
+                        int pmdReturn=0;
+                        while (pmdReturn!=-1) {
+                            pmdReturn = pmdInputStream.readByte();
+                            if ( pmdReturn == -1) { // CLOSE PMD
+                                Log.d(TAG, "pmd shutdown successful");
+                                showToast("pmd shutdown successful");
+                            } else if ( pmdReturn == 2) {
+                                Log.d(TAG, "pmd writing now");
+                                showToast("pmd writing now");
+                            }
+                            else {
+                                Log.d(TAG, "unknown message from pmd" + String.format("%04d", pictureCounter));
+                                showToast("unknown message from pmd" + String.format("%04d", pictureCounter));
+                            }
+                        }
                         lightstageInputStream.close();
 //                        pmdInputStream.close();
                         lightstageOutStream.close();
