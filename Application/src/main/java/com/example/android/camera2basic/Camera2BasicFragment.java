@@ -994,6 +994,7 @@ public class Camera2BasicFragment extends Fragment
     private String pictureSession;
 
     private class initiateRemoteControlFromPi extends AsyncTask<String, Void, String> {
+
         @Override
         protected String doInBackground(String... params) {
             //String hostname = "192.168.9.126";
@@ -1007,48 +1008,74 @@ public class Camera2BasicFragment extends Fragment
 
 
             try {
+                boolean pmd_present=false;
                 try {
                     lightstageClientSocket = new Socket(hostname, lightStagePort);
-                    pmdClientSocket = new Socket(hostname, pmdPort);
                     }
                 catch (UnknownHostException e) {
                     System.err.println("Don't know about host: " + hostname + " trying airowski for devel");
-                    hostname = "192.168.9.61";
-                    //hostname =  "airowski";
+                    //hostname = "192.168.9.61";
+                    hostname =  "airowski";
                     try {
                         lightstageClientSocket = new Socket(hostname, lightStagePort);
-                        pmdClientSocket = new Socket(hostname, pmdPort);
                     }
                     catch (UnknownHostException e1) {
                         System.err.println("Don't know about host: " + hostname );
                     }
+                }
+                // ONCE WE KNOW THE HOSTNAME WE TRY TO CONNECT TO PMD
+                try {
+                    pmdClientSocket = new Socket(hostname, pmdPort);
+                    pmd_present=true;
+                }
+                catch (IOException e) {
+                    System.err.println("PMD not present - continuing without it");
 
                 }
-                lightstageOutStream = new DataOutputStream(lightstageClientSocket.getOutputStream());
-                pmdOutStream = new DataOutputStream(pmdClientSocket.getOutputStream());
-                lightstageInputStream = new DataInputStream(lightstageClientSocket.getInputStream());
-                pmdInputStream = new DataInputStream(pmdClientSocket.getInputStream());
 
+
+                lightstageOutStream = new DataOutputStream(lightstageClientSocket.getOutputStream());
+                lightstageInputStream = new DataInputStream(lightstageClientSocket.getInputStream());
                 // Send first message
                 lightstageOutStream.writeByte(1); // INIT LIGHTSTAGE
-                pmdOutStream.writeByte(1); // INIT PMD
                 lightstageOutStream.flush(); // Send off the data
-                pmdOutStream.flush(); // Send off the data
 
-                Log.d(TAG, "waiting for lightstage & pmd");
+                if (pmd_present) {
+                    pmdOutStream = new DataOutputStream(pmdClientSocket.getOutputStream());
+                    pmdInputStream = new DataInputStream(pmdClientSocket.getInputStream());
 
-                // wait for pmd to answer
-                if (pmdInputStream.readByte()==1) { // INIT PMD
-                    Log.d(TAG, "pico ready!");
+                    pmdOutStream.writeByte(1); // INIT PMD
+                    pmdOutStream.flush(); // Send off the data
                 }
+
+                Log.d(TAG, "waiting for lightstage");
+
+                if (lightstageInputStream.readByte()==1) {
+                    Log.d(TAG, "lightstage ready!");
+                }
+
+                Log.d(TAG, "waiting for pmd");
+                // wait for pmd to answer
+                if (pmdInputStream.readByte()==1) {
+                    Log.d(TAG, "pmd ready!");
+                }
+
                 pictureSession = getCurrentTimeStamp();
                 Log.d(TAG, "timestamp: " + pictureSession );
                 pictureCounter=0;
 
+                boolean pmd_recording=false;
                 while (true) {
                     int command = lightstageInputStream.readByte();
+
                     if (command == 2) {
-//                        runOnUiThread(takePictureRunnable);
+                        if (pmd_present && pmd_recording==false) {
+                            // start recording on pmd
+                            pmdOutStream.writeByte(2); // start recording
+                            pmdOutStream.flush(); // Send off the data
+                            pmd_recording=true;
+                        }
+
                         mFile = new File(getActivity().getExternalFilesDir(null), pictureSession + "_" + String.format("%04d", pictureCounter) + ".jpg");
 
                         //exposureTime=0.1f;
@@ -1100,6 +1127,7 @@ public class Camera2BasicFragment extends Fragment
                         lightstageOutStream.close();
                         pmdOutStream.close();
                         lightstageClientSocket.close(); // close is the preferred way over shutdown
+                        pmdClientSocket.close();
                         Log.d( TAG,"clean exit");
                         return null;
                     }
