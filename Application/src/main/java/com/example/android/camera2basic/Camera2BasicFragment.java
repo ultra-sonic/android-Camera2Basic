@@ -35,6 +35,7 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
+import android.hardware.camera2.params.MeteringRectangle;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
@@ -58,6 +59,7 @@ import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.SeekBar;
 import android.widget.Toast;
 
 import java.io.DataInputStream;
@@ -294,6 +296,7 @@ public class Camera2BasicFragment extends Fragment
             = new CameraCaptureSession.CaptureCallback() {
 
         private void process(CaptureResult result) {
+
             switch (mState) {
                 case STATE_PREVIEW: {
                     // We have nothing to do when the camera preview is working normally.
@@ -329,6 +332,7 @@ public class Camera2BasicFragment extends Fragment
                     break;
                 }
                 case STATE_WAITING_NON_PRECAPTURE: {
+                    Log.d(TAG, "focus range: " + result.get(CaptureResult.LENS_FOCUS_RANGE) );
                     // CONTROL_AE_STATE can be null on some devices
                     Integer aeState = result.get(CaptureResult.CONTROL_AE_STATE);
                     if (aeState == null || aeState != CaptureResult.CONTROL_AE_STATE_PRECAPTURE) {
@@ -714,11 +718,15 @@ public class Camera2BasicFragment extends Fragment
                             mCaptureSession = cameraCaptureSession;
                             try {
                                 // Auto focus should be continuous for camera preview.
+                                //mPreviewRequestBuilder.set(
+                                //        CaptureRequest.CONTROL_AF_MODE,
+                                //        CaptureRequest.CONTROL_AF_MODE_AUTO); // CONTROL_AF_MODE_CONTINUOUS_PICTURE
+
                                 mPreviewRequestBuilder.set(
                                         CaptureRequest.CONTROL_AF_MODE,
-                                        CaptureRequest.CONTROL_AF_MODE_AUTO); // CONTROL_AF_MODE_CONTINUOUS_PICTURE
-                                // mPreviewRequestBuilder.set(
-                                //        CaptureRequest.LENS_FOCUS_DISTANCE, 0.5f); // 0f sets focus to infinity
+                                        CaptureRequest.CONTROL_AF_MODE_OFF);
+                                mPreviewRequestBuilder.set(
+                                        CaptureRequest.LENS_FOCUS_DISTANCE, 3.3f); // 0f sets focus to infinity
 
                                 mPreviewRequestBuilder.set(
                                         CaptureRequest.CONTROL_AWB_MODE,
@@ -787,6 +795,7 @@ public class Camera2BasicFragment extends Fragment
      * Initiate a still image capture.
      */
     private void takePicture() {
+        KEEP_FOCUS_LOCKED = true;
         lockFocus();
     }
 
@@ -800,15 +809,28 @@ public class Camera2BasicFragment extends Fragment
             if (KEEP_FOCUS_LOCKED) {
                 Log.d(TAG, "keeping focus - no locking");
                 // This is how to tell the camera to lock focus.
-                mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
-                        CameraMetadata.CONTROL_AF_TRIGGER_IDLE);
+                //mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, //null);
+                //         CaptureRequest.CONTROL_AF_TRIGGER_CANCEL);
                 mState = STATE_WAITING_NON_PRECAPTURE;// STATE_WAITING_PRECAPTURE;
             }
             else {
                 // This is how to tell the camera to lock focus.
                 Log.d(TAG, "locking focus");
+                MeteringRectangle focusAreaTouch = new MeteringRectangle(
+                        4096/2 -200,
+                        5488/2 -200 ,
+                        400 ,
+                        400 ,
+                        MeteringRectangle.METERING_WEIGHT_MAX - 1);
+
+
+                // https://gist.github.com/royshil/8c760c2485257c85a11cafd958548482#file-androidcamera2touchtofocus-java
+                mPreviewRequestBuilder.set(
+                        CaptureRequest.CONTROL_AF_REGIONS,
+                        new MeteringRectangle[]{focusAreaTouch});
+
                 mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
-                        CameraMetadata.CONTROL_AF_TRIGGER_START);
+                        CaptureRequest.CONTROL_AF_TRIGGER_START);
                 // Tell #mCaptureCallback to wait for the lock.
                 mState = STATE_WAITING_LOCK;
             }
@@ -862,8 +884,10 @@ public class Camera2BasicFragment extends Fragment
             captureBuilder.addTarget(mImageReader.getSurface());
 
             // Use the same AE and AF modes as the preview.
-            captureBuilder.set(CaptureRequest.CONTROL_AF_MODE,
-                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+            //captureBuilder.set(
+            //        CaptureRequest.CONTROL_AF_MODE,
+            //        CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+            //);
 
 
             // setAutoFlash(captureBuilder);
@@ -922,7 +946,7 @@ public class Camera2BasicFragment extends Fragment
             // This is how to tell the camera to keep the focus locked.
             mPreviewRequestBuilder.set(
                     CaptureRequest.CONTROL_AF_TRIGGER,
-                    CameraMetadata.CONTROL_AF_TRIGGER_IDLE);
+                    CaptureRequest.CONTROL_AF_TRIGGER_IDLE);
 
             mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
                     mBackgroundHandler);
@@ -939,7 +963,7 @@ public class Camera2BasicFragment extends Fragment
         try {
             // Reset the auto-focus trigger
             mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
-                    CameraMetadata.CONTROL_AF_TRIGGER_CANCEL);
+                    CaptureRequest.CONTROL_AF_TRIGGER_CANCEL);
 
             mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
                     mBackgroundHandler);
@@ -951,8 +975,6 @@ public class Camera2BasicFragment extends Fragment
             e.printStackTrace();
         }
     }
-
-
 
 
     @Override
@@ -976,7 +998,7 @@ public class Camera2BasicFragment extends Fragment
     }
 
     public static String getCurrentTimeStamp() {
-        SimpleDateFormat sdfDate = new SimpleDateFormat("yyyyMMddHHmmss");//dd/MM/yyyy
+        SimpleDateFormat sdfDate = new SimpleDateFormat("yyyyMMdd_HHmmss");//dd/MM/yyyy
         Date now = new Date();
         String strDate = sdfDate.format(now);
         return strDate;
@@ -1054,15 +1076,20 @@ public class Camera2BasicFragment extends Fragment
                     Log.d(TAG, "lightstage ready!");
                 }
 
-                Log.d(TAG, "waiting for pmd");
-                // wait for pmd to answer
-                if (pmdInputStream.readByte()==1) {
-                    Log.d(TAG, "pmd ready!");
+                if (pmd_present) {
+                    Log.d(TAG, "waiting for pmd");
+                    // wait for pmd to answer
+                    if (pmdInputStream.readByte()==1) {
+                        Log.d(TAG, "pmd ready!");
+                    }
                 }
 
                 pictureSession = getCurrentTimeStamp();
                 Log.d(TAG, "timestamp: " + pictureSession );
                 pictureCounter=0;
+
+                lockFocus();
+
 
                 boolean pmd_recording=false;
                 while (true) {
@@ -1083,13 +1110,16 @@ public class Camera2BasicFragment extends Fragment
                         try {
                             takePicture();
                             KEEP_FOCUS_LOCKED=true;
+                            //captureStillPicture();
+
                         }
                         catch (Exception e) {
                             e.printStackTrace();
                             Log.d(TAG, "something went wrong during takePicture");
                             try {
                                 lightstageOutStream.writeByte(-2);
-                                pmdOutStream.writeByte(-2);
+                                if (pmd_present)
+                                    pmdOutStream.writeByte(-2);
                             }
                             catch (IOException e1) {
                                 e1.printStackTrace();
@@ -1106,28 +1136,33 @@ public class Camera2BasicFragment extends Fragment
                     } else if (command == -1) {
                         unlockFocus();
                         KEEP_FOCUS_LOCKED = false;
-                        pmdOutStream.writeByte(-1);
-                        int pmdReturn=0;
-                        while (pmdReturn!=-1) {
-                            pmdReturn = pmdInputStream.readByte();
-                            if ( pmdReturn == -1) { // CLOSE PMD
-                                Log.d(TAG, "pmd shutdown successful");
-                                showToast("pmd shutdown successful");
-                            } else if ( pmdReturn == 2) {
-                                Log.d(TAG, "pmd writing now");
-                                showToast("pmd writing now");
+
+                        if (pmd_present) {
+                            pmdOutStream.writeByte(-1);
+                            int pmdReturn=0;
+                            while (pmdReturn!=-1) {
+                                pmdReturn = pmdInputStream.readByte();
+                                if ( pmdReturn == -1) { // CLOSE PMD
+                                    Log.d(TAG, "pmd shutdown successful");
+                                    showToast("pmd shutdown successful");
+                                } else if ( pmdReturn == 2) {
+                                    Log.d(TAG, "pmd writing now");
+                                    showToast("pmd writing now");
+                                }
+                                else {
+                                    Log.d(TAG, "unknown message from pmd" + String.format("%04d", pictureCounter));
+                                    showToast("unknown message from pmd" + String.format("%04d", pictureCounter));
+                                }
                             }
-                            else {
-                                Log.d(TAG, "unknown message from pmd" + String.format("%04d", pictureCounter));
-                                showToast("unknown message from pmd" + String.format("%04d", pictureCounter));
-                            }
+//                        pmdInputStream.close();
+                            pmdInputStream.close();
+                            pmdOutStream.close();
+                            pmdClientSocket.close();
                         }
                         lightstageInputStream.close();
-//                        pmdInputStream.close();
                         lightstageOutStream.close();
-                        pmdOutStream.close();
                         lightstageClientSocket.close(); // close is the preferred way over shutdown
-                        pmdClientSocket.close();
+
                         Log.d( TAG,"clean exit");
                         return null;
                     }
@@ -1169,9 +1204,9 @@ public class Camera2BasicFragment extends Fragment
                 CaptureRequest.FLASH_MODE,
                 CaptureRequest.FLASH_MODE_OFF);
 
-        requestBuilder.set(
-                CaptureRequest.CONTROL_AF_TRIGGER,
-                CameraMetadata.CONTROL_AF_TRIGGER_IDLE);
+//        requestBuilder.set(
+//                CaptureRequest.CONTROL_AF_TRIGGER,
+//                CameraMetadata.CONTROL_AF_TRIGGER_IDLE);
 
         requestBuilder.set(
                 CaptureRequest.SENSOR_SENSITIVITY,
@@ -1194,7 +1229,7 @@ public class Camera2BasicFragment extends Fragment
         requestBuilder.set(
         CaptureRequest.SENSOR_EXPOSURE_TIME,
                 // (long) exposureTimeInSeconds*1000000000 ); // 500000000L = 0.5 seconds
-                500000000L);
+                100000000L);
     }
 
 
