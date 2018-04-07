@@ -1229,7 +1229,7 @@ public class Camera2BasicFragment extends Fragment
         requestBuilder.set(
         CaptureRequest.SENSOR_EXPOSURE_TIME,
                 // (long) exposureTimeInSeconds*1000000000 ); // 500000000L = 0.5 seconds
-                100000000L);
+                50000000L);
     }
 
 
