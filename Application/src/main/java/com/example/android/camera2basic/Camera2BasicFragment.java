@@ -237,11 +237,14 @@ public class Camera2BasicFragment extends Fragment
      * An {@link ImageReader} that handles still image capture.
      */
     private ImageReader mImageReader;
+    private ImageReader[] mImageReaderArray = new ImageReader[40];
 
     /**
      * This is the output file for our picture.
      */
     private File mFile;
+    private File[] mFileArray = new File[40];
+
 
     /**
      * This a callback object for the {@link ImageReader}. "onImageAvailable" will be called when a
@@ -1020,8 +1023,8 @@ public class Camera2BasicFragment extends Fragment
         @Override
         protected String doInBackground(String... params) {
             //String hostname = "192.168.9.126";
-            //String hostname = "192.168.43.123";
-            String hostname = "lightstage"; // TODO: put hostname into UI - and remember the last one used
+            String hostname = "192.168.43.203";
+            //String hostname = "lightstage"; // TODO: put hostname into UI - and remember the last one used
             Socket lightstageClientSocket = null;
             int lightStagePort=50007;
             Socket pmdClientSocket = null;
@@ -1210,7 +1213,7 @@ public class Camera2BasicFragment extends Fragment
 
         requestBuilder.set(
                 CaptureRequest.SENSOR_SENSITIVITY,
-                400);
+                200);
 
         //Set the JPEG quality here like so
         requestBuilder.set(
@@ -1229,7 +1232,7 @@ public class Camera2BasicFragment extends Fragment
         requestBuilder.set(
         CaptureRequest.SENSOR_EXPOSURE_TIME,
                 // (long) exposureTimeInSeconds*1000000000 ); // 500000000L = 0.5 seconds
-                100000000L);
+                200000000L);
     }
 
 
