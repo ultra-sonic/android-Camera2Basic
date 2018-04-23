@@ -237,7 +237,7 @@ public class Camera2BasicFragment extends Fragment
      * An {@link ImageReader} that handles still image capture.
      */
     private ImageReader mImageReader;
-    private ImageReader[] mImageReaderArray = new ImageReader[40];
+    private Image[] mImageReaderArray = new Image[40];
 
     /**
      * This is the output file for our picture.
@@ -255,7 +255,15 @@ public class Camera2BasicFragment extends Fragment
 
         @Override
         public void onImageAvailable(ImageReader reader) {
-            mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage(), mFile));
+            // OLD
+            // mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage(), mFile));
+
+            // NEW
+            Image tmpImage=reader.acquireNextImage();
+            mImageReaderArray[pictureCounter] = tmpImage;
+            mFileArray[pictureCounter] = mFile;
+            tmpImage.close();
+
         }
 
     };
@@ -914,11 +922,23 @@ public class Camera2BasicFragment extends Fragment
                     backToPreviewState(); // this was unlockFocus before but we just need to go back to preview state so I split it up to 2 functions
                     // unlockFocus(); // needed to uncomment this because we shoot a sequence and
                     // therfore need the focus to stay the same
+                    if (lightstageOutStream != null)
+                        try {
+                            Log.d(TAG, "signaling lightstage to continue");
+                            lightstageOutStream.writeByte(3);
+
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    else
+                        Log.e(TAG, "lightstage Outputstream not available");
+
                 }
             };
 
             mCaptureSession.stopRepeating();
-            mCaptureSession.abortCaptures();
+            //mCaptureSession.abortCaptures();
+            //mCaptureSession.close(); // instead of capture
             mCaptureSession.capture(captureBuilder.build(), CaptureCallback, null);
         } catch (CameraAccessException e) {
             e.printStackTrace();
@@ -1023,7 +1043,8 @@ public class Camera2BasicFragment extends Fragment
         @Override
         protected String doInBackground(String... params) {
             //String hostname = "192.168.9.126";
-            String hostname = "192.168.43.203";
+            String hostname = "192.168.9.102";
+            //String hostname = "192.168.43.203";
             //String hostname = "lightstage"; // TODO: put hostname into UI - and remember the last one used
             Socket lightstageClientSocket = null;
             int lightStagePort=50007;
@@ -1140,6 +1161,9 @@ public class Camera2BasicFragment extends Fragment
                         unlockFocus();
                         KEEP_FOCUS_LOCKED = false;
 
+                        // write all frames:
+                        mBackgroundHandler.post(new DelayedImageSaver());
+
                         if (pmd_present) {
                             pmdOutStream.writeByte(-1);
                             int pmdReturn=0;
@@ -1213,7 +1237,7 @@ public class Camera2BasicFragment extends Fragment
 
         requestBuilder.set(
                 CaptureRequest.SENSOR_SENSITIVITY,
-                200);
+                800);
 
         //Set the JPEG quality here like so
         requestBuilder.set(
@@ -1232,7 +1256,7 @@ public class Camera2BasicFragment extends Fragment
         requestBuilder.set(
         CaptureRequest.SENSOR_EXPOSURE_TIME,
                 // (long) exposureTimeInSeconds*1000000000 ); // 500000000L = 0.5 seconds
-                200000000L);
+                50000000L);
     }
 
 
@@ -1254,6 +1278,69 @@ public class Camera2BasicFragment extends Fragment
         ImageSaver(Image image, File file) {
             mImage = image;
             mFile = file;
+        }
+
+        @Override
+        public void run() {
+            ByteBuffer buffer = mImage.getPlanes()[0].getBuffer();
+            byte[] bytes = new byte[buffer.remaining()];
+            buffer.get(bytes);
+
+            FileOutputStream output = null;
+
+            try {
+                output = new FileOutputStream(mFile);
+                output.write(bytes);
+            } catch (IOException e) {
+                e.printStackTrace();
+                Log.d(TAG, "something went wrong during file save");
+                try {
+                    lightstageOutStream.writeByte(-2);
+                } catch (IOException e1) {
+                    e1.printStackTrace();
+                }
+            } finally {
+                mImage.close();
+                if (null != output) {
+                    try {
+                        output.close();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+            if (lightstageOutStream!=null)
+                try {
+                    Log.d(TAG, "signaling lightstage to continue");
+                    lightstageOutStream.writeByte(3);
+
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            else
+                Log.e(TAG, "lightstage Outputstream not available");
+        }
+
+    }
+
+    private static class DelayedImageSaver implements Runnable {
+
+        /**
+         * The JPEG image array
+         */
+        private final Image[] mImage;
+
+        private final int mImageCount;
+
+        /**
+         * The file we save the image into - array
+         */
+        private final File[] mFile;
+
+        ImageSaver(Image[] image, File[] file, int imageCount) {
+            mImage = image;
+            mFile = file;
+            mImageCount = imageCount;
         }
 
         @Override
