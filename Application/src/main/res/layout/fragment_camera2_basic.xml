@@ -80,7 +80,7 @@
         android:layout_below="@+id/seekBar"
         android:ems="10"
         android:inputType="textPersonName"
-        android:text="lightstage"
+        android:text="@string/hostAddressString"
         android:textAlignment="center" />
 
     <CheckBox

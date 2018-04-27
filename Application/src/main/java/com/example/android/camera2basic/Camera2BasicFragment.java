@@ -1042,9 +1042,8 @@ public class Camera2BasicFragment extends Fragment
 
         @Override
         protected String doInBackground(String... params) {
-            //String hostname = "192.168.9.126";
-            String hostname = "192.168.9.102";
-            //String hostname = "192.168.43.203";
+
+            String hostname = getResources().getString( R.string.hostAddressString );
             //String hostname = "lightstage"; // TODO: put hostname into UI - and remember the last one used
             Socket lightstageClientSocket = null;
             int lightStagePort=50007;
@@ -1059,17 +1058,10 @@ public class Camera2BasicFragment extends Fragment
                     lightstageClientSocket = new Socket(hostname, lightStagePort);
                     }
                 catch (UnknownHostException e) {
-                    System.err.println("Don't know about host: " + hostname + " trying airowski for devel");
-                    //hostname = "192.168.9.61";
-                    hostname =  "airowski";
-                    try {
-                        lightstageClientSocket = new Socket(hostname, lightStagePort);
-                    }
-                    catch (UnknownHostException e1) {
-                        System.err.println("Don't know about host: " + hostname );
-                    }
+                    System.err.println("Don't know about host: " + hostname );
+                    showToast("Don't know about host: " + hostname );
                 }
-                // ONCE WE KNOW THE HOSTNAME WE TRY TO CONNECT TO PMD
+
                 try {
                     pmdClientSocket = new Socket(hostname, pmdPort);
                     pmd_present=true;
@@ -1162,7 +1154,7 @@ public class Camera2BasicFragment extends Fragment
                         KEEP_FOCUS_LOCKED = false;
 
                         // write all frames:
-                        mBackgroundHandler.post(new DelayedImageSaver());
+                        mBackgroundHandler.post(new DelayedImageSaver(mImageReaderArray,mFileArray,pictureCounter));
 
                         if (pmd_present) {
                             pmdOutStream.writeByte(-1);
@@ -1328,60 +1320,65 @@ public class Camera2BasicFragment extends Fragment
         /**
          * The JPEG image array
          */
-        private final Image[] mImage;
+        private final Image[] mImageArray;
 
         private final int mImageCount;
 
         /**
          * The file we save the image into - array
          */
-        private final File[] mFile;
+        private final File[] mFileArray;
 
-        ImageSaver(Image[] image, File[] file, int imageCount) {
-            mImage = image;
-            mFile = file;
+        DelayedImageSaver(Image[] image, File[] file, int imageCount) {
+            mImageArray = image;
+            mFileArray = file;
             mImageCount = imageCount;
         }
 
         @Override
         public void run() {
-            ByteBuffer buffer = mImage.getPlanes()[0].getBuffer();
-            byte[] bytes = new byte[buffer.remaining()];
-            buffer.get(bytes);
+            for (int imgIdx=0;imgIdx<mImageCount;imgIdx++) {
+                File mFile=mFileArray[imgIdx];
+                Image mImage=mImageArray[imgIdx];
 
-            FileOutputStream output = null;
+                ByteBuffer buffer = mImage.getPlanes()[0].getBuffer();
+                byte[] bytes = new byte[buffer.remaining()];
+                buffer.get(bytes);
 
-            try {
-                output = new FileOutputStream(mFile);
-                output.write(bytes);
-            } catch (IOException e) {
-                e.printStackTrace();
-                Log.d(TAG, "something went wrong during file save");
+                FileOutputStream output = null;
+
                 try {
-                    lightstageOutStream.writeByte(-2);
-                } catch (IOException e1) {
-                    e1.printStackTrace();
-                }
-            } finally {
-                mImage.close();
-                if (null != output) {
+                    output = new FileOutputStream(mFile);
+                    output.write(bytes);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    Log.d(TAG, "something went wrong during file save");
                     try {
-                        output.close();
+                        lightstageOutStream.writeByte(-2);
+                    } catch (IOException e1) {
+                        e1.printStackTrace();
+                    }
+                } finally {
+                    mImage.close();
+                    if (null != output) {
+                        try {
+                            output.close();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+                if (lightstageOutStream!=null)
+                    try {
+                        Log.d(TAG, "signaling lightstage to continue");
+                        lightstageOutStream.writeByte(3);
+
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
-                }
+                else
+                    Log.e(TAG, "lightstage Outputstream not available");
             }
-            if (lightstageOutStream!=null)
-                try {
-                    Log.d(TAG, "signaling lightstage to continue");
-                    lightstageOutStream.writeByte(3);
-
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            else
-                Log.e(TAG, "lightstage Outputstream not available");
         }
 
     }
