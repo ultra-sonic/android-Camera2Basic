@@ -270,7 +270,6 @@ public class Camera2BasicFragment extends Fragment
             //NEW
             Image tmpImage=reader.acquireNextImage();
             bufferArray[pictureCounter] = cloneByteBuffer( tmpImage.getPlanes()[0].getBuffer() );
-            mFileArray[pictureCounter] = mFile;
             tmpImage.close();
 
             // NEW AND OLD ALIKE
@@ -486,11 +485,6 @@ public class Camera2BasicFragment extends Fragment
         });
     }
 
-//    @Override
-//    public void onActivityCreated(Bundle savedInstanceState) {
-//        super.onActivityCreated(savedInstanceState);
-//        mFile = new File(getActivity().getExternalFilesDir(null), "pic.jpg");
-//    }
 
     @Override
     public void onResume() {
@@ -946,7 +940,7 @@ public class Camera2BasicFragment extends Fragment
                                                @NonNull CaptureRequest request,
                                                @NonNull TotalCaptureResult result) {
                     // showToast("Saved: " + mFile);
-                    Log.d(TAG, mFile.toString());
+                    // Log.d(TAG, mFile.toString());
 
                     backToPreviewState(); // this was unlockFocus before but we just need to go back to preview state so I split it up to 2 functions
                     // unlockFocus(); // needed to uncomment this because we shoot a sequence and
@@ -1191,7 +1185,7 @@ public class Camera2BasicFragment extends Fragment
                             pmd_recording=true;
                         }
 
-                        mFile = new File(getActivity().getExternalFilesDir(null), pictureSession + "_" + String.format("%04d", pictureCounter) + ".jpg");
+                        // mFile = new File(getActivity().getExternalFilesDir(null), pictureSession + "_" + String.format("%04d", pictureCounter) + ".jpg");
 
                         //exposureTime=0.1f;
 
@@ -1219,6 +1213,10 @@ public class Camera2BasicFragment extends Fragment
                         KEEP_FOCUS_LOCKED = false;
 
                         // delayed write all frames:
+                        for (int imgIdx=0;imgIdx<pictureCounter;imgIdx++) {
+                            mFile = new File(getActivity().getExternalFilesDir(null), pictureSession + "_" + String.format("%04d", imgIdx) + ".jpg");
+                            mFileArray[imgIdx] = mFile;
+                        }
                         mBackgroundHandler.post(new DelayedImageSaver(bufferArray,mFileArray,pictureCounter));
 
                         if (pmd_present) {
