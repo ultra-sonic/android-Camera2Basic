@@ -34,7 +34,6 @@ import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
-import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.params.MeteringRectangle;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.CaptureResult;
@@ -59,7 +58,9 @@ import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.EditText;
 import android.widget.SeekBar;
+import android.widget.Spinner;
 import android.widget.Toast;
 
 import java.io.DataInputStream;
@@ -175,6 +176,12 @@ public class Camera2BasicFragment extends Fragment
      */
     private AutoFitTextureView mTextureView;
 
+    private EditText hostAdressView;
+
+    private SeekBar seekBarView;
+
+    private Spinner shotModeSpinnerView;
+
     /**
      * A {@link CameraCaptureSession } for camera preview.
      */
@@ -189,6 +196,7 @@ public class Camera2BasicFragment extends Fragment
      * The {@link android.util.Size} of camera preview.
      */
     private Size mPreviewSize;
+
 
     /**
      * {@link CameraDevice.StateCallback} is called when {@link CameraDevice} changes its state.
@@ -237,7 +245,8 @@ public class Camera2BasicFragment extends Fragment
      * An {@link ImageReader} that handles still image capture.
      */
     private ImageReader mImageReader;
-    private Image[] mImageReaderArray = new Image[40];
+    private Image[] mImageArray = new Image[40];
+    private ByteBuffer[] bufferArray = new ByteBuffer[40];
 
     /**
      * This is the output file for our picture.
@@ -255,14 +264,17 @@ public class Camera2BasicFragment extends Fragment
 
         @Override
         public void onImageAvailable(ImageReader reader) {
-            // OLD
+            //OLD
             // mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage(), mFile));
 
-            // NEW
+            //NEW
             Image tmpImage=reader.acquireNextImage();
-            mImageReaderArray[pictureCounter] = tmpImage;
+            bufferArray[pictureCounter] = cloneByteBuffer( tmpImage.getPlanes()[0].getBuffer() );
             mFileArray[pictureCounter] = mFile;
             tmpImage.close();
+
+            // NEW AND OLD ALIKE
+            pictureCounter++;
 
         }
 
@@ -455,6 +467,23 @@ public class Camera2BasicFragment extends Fragment
         view.findViewById(R.id.picture).setOnClickListener(this);
         view.findViewById(R.id.info).setOnClickListener(this);
         mTextureView = (AutoFitTextureView) view.findViewById(R.id.texture);
+        hostAdressView = (EditText) view.findViewById(R.id.hostAddress);
+        seekBarView = (SeekBar) view.findViewById(R.id.seekBar );
+        shotModeSpinnerView = (Spinner)  view.findViewById(R.id.shotModeSpinner );
+
+        seekBarView.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                //float minimumLens = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
+                float num = (3.3f - ((float)progress) * 0.45f); // pos 0=3.3f for faces - pos4=1.5f for sweethearts radkappe
+                Log.d(TAG, "progress: " + Float.toString(num));
+                mPreviewRequestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, num);
+            }
+        });
     }
 
 //    @Override
@@ -737,7 +766,7 @@ public class Camera2BasicFragment extends Fragment
                                         CaptureRequest.CONTROL_AF_MODE,
                                         CaptureRequest.CONTROL_AF_MODE_OFF);
                                 mPreviewRequestBuilder.set(
-                                        CaptureRequest.LENS_FOCUS_DISTANCE, 3.3f); // 0f sets focus to infinity
+                                        CaptureRequest.LENS_FOCUS_DISTANCE, 3.3f ); // 3.3f for faces - 1.5f for sweethearts radkappe - 0f sets focus to infinity
 
                                 mPreviewRequestBuilder.set(
                                         CaptureRequest.CONTROL_AWB_MODE,
@@ -1002,11 +1031,27 @@ public class Camera2BasicFragment extends Fragment
 
     @Override
     public void onClick(View view) {
+        Log.d(TAG, String.format( "%04d",  view.getId() ) );
+        Log.d(TAG, String.format( "%04d",  R.id.seekBar ) );
         switch (view.getId()) {
             case R.id.picture: {
                 new initiateRemoteControlFromPi().execute("");
                 break;
             }
+//            case R.id.seekBar: {
+//                float focus_distance=seekBarView.getProgress();
+//                try {
+//                    mPreviewRequestBuilder.set(
+//                            CaptureRequest.LENS_FOCUS_DISTANCE, 3.3f + focus_distance ); // 0f sets focus to infinity
+//                    mPreviewRequest = mPreviewRequestBuilder.build();
+//                    mCaptureSession.setRepeatingRequest(mPreviewRequest,
+//                            mCaptureCallback, mBackgroundHandler);
+//                } catch (CameraAccessException e) {
+//                    e.printStackTrace();
+//                }
+//                Log.d(TAG, "focus range: " + String.format("%f", focus_distance ));
+//                break;
+//            }
             case R.id.info: {
                 Activity activity = getActivity();
                 if (null != activity) {
@@ -1038,12 +1083,14 @@ public class Camera2BasicFragment extends Fragment
     private int pictureCounter=0;
     private String pictureSession;
 
+
     private class initiateRemoteControlFromPi extends AsyncTask<String, Void, String> {
+
 
         @Override
         protected String doInBackground(String... params) {
 
-            String hostname = getResources().getString( R.string.hostAddressString );
+            String hostname = hostAdressView.getText().toString();
             //String hostname = "lightstage"; // TODO: put hostname into UI - and remember the last one used
             Socket lightstageClientSocket = null;
             int lightStagePort=50007;
@@ -1060,6 +1107,7 @@ public class Camera2BasicFragment extends Fragment
                 catch (UnknownHostException e) {
                     System.err.println("Don't know about host: " + hostname );
                     showToast("Don't know about host: " + hostname );
+                    return null;
                 }
 
                 try {
@@ -1071,11 +1119,32 @@ public class Camera2BasicFragment extends Fragment
 
                 }
 
-
                 lightstageOutStream = new DataOutputStream(lightstageClientSocket.getOutputStream());
                 lightstageInputStream = new DataInputStream(lightstageClientSocket.getInputStream());
-                // Send first message
-                lightstageOutStream.writeByte(1); // INIT LIGHTSTAGE
+
+                // init lightstage shotmode and send first message
+                String shotMode = String.valueOf( shotModeSpinnerView.getSelectedItem() );
+                // INIT LIGHTSTAGE
+                Integer welcomeMessage=-1;
+                switch (shotMode) {
+                    case "single shot": {
+                        welcomeMessage=10;
+                        break;
+                    }
+                    case "no polarizer": {
+                        welcomeMessage=11;
+                        break;
+                    }
+                    case "cross-polarized": {
+                        welcomeMessage=12;
+                        break;
+                    }
+                    case "full-blown shoot": {
+                        welcomeMessage=13;
+                        break;
+                    }
+                }
+                lightstageOutStream.writeByte(welcomeMessage);
                 lightstageOutStream.flush(); // Send off the data
 
                 if (pmd_present) {
@@ -1088,8 +1157,12 @@ public class Camera2BasicFragment extends Fragment
 
                 Log.d(TAG, "waiting for lightstage");
 
-                if (lightstageInputStream.readByte()==1) {
+                if (lightstageInputStream.readByte()==welcomeMessage) {
                     Log.d(TAG, "lightstage ready!");
+                }
+                else {
+                    Log.d(TAG, "lightstage not ready - got back wrong welcome message");
+                    return null;
                 }
 
                 if (pmd_present) {
@@ -1105,7 +1178,6 @@ public class Camera2BasicFragment extends Fragment
                 pictureCounter=0;
 
                 lockFocus();
-
 
                 boolean pmd_recording=false;
                 while (true) {
@@ -1126,8 +1198,6 @@ public class Camera2BasicFragment extends Fragment
                         try {
                             takePicture();
                             KEEP_FOCUS_LOCKED=true;
-                            //captureStillPicture();
-
                         }
                         catch (Exception e) {
                             e.printStackTrace();
@@ -1143,18 +1213,13 @@ public class Camera2BasicFragment extends Fragment
                         }
                         //exposureTime=0.2f; // bracketing
                         //takePicture();
-
-
-                        Log.d( TAG, "taking picture" + String.format("%04d", pictureCounter));
-                        pictureCounter++;
-//                        runnable.setData("took picture");
-//                        runOnUiThread(runnable);
+                        Log.d( TAG, "taking picture " + String.format("%04d", pictureCounter));
                     } else if (command == -1) {
                         unlockFocus();
                         KEEP_FOCUS_LOCKED = false;
 
-                        // write all frames:
-                        mBackgroundHandler.post(new DelayedImageSaver(mImageReaderArray,mFileArray,pictureCounter));
+                        // delayed write all frames:
+                        mBackgroundHandler.post(new DelayedImageSaver(bufferArray,mFileArray,pictureCounter));
 
                         if (pmd_present) {
                             pmdOutStream.writeByte(-1);
@@ -1169,8 +1234,8 @@ public class Camera2BasicFragment extends Fragment
                                     showToast("pmd writing now");
                                 }
                                 else {
-                                    Log.d(TAG, "unknown message from pmd" + String.format("%04d", pictureCounter));
-                                    showToast("unknown message from pmd" + String.format("%04d", pictureCounter));
+                                    Log.d(TAG, "unknown message from pmd " + String.format("%04d", pictureCounter));
+                                    showToast("unknown message from pmd " + String.format("%04d", pictureCounter));
                                 }
                             }
 //                        pmdInputStream.close();
@@ -1208,7 +1273,7 @@ public class Camera2BasicFragment extends Fragment
                     CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
         }
     }
-
+    private long isoBooster=4L;
     private void setManualMode(CaptureRequest.Builder requestBuilder) {
 
         requestBuilder.set(
@@ -1229,7 +1294,7 @@ public class Camera2BasicFragment extends Fragment
 
         requestBuilder.set(
                 CaptureRequest.SENSOR_SENSITIVITY,
-                800);
+                (int) (200*isoBooster));
 
         //Set the JPEG quality here like so
         requestBuilder.set(
@@ -1238,7 +1303,7 @@ public class Camera2BasicFragment extends Fragment
 
 //        requestBuilder.set(
 //                CaptureRequest.LENS_FOCUS_DISTANCE,
-//                0.1f); // 0.0f sets focus to infinity
+//                3.3f + seekBarView.getProgress() ); // 0.0f sets focus to infinity
 
 
 
@@ -1248,7 +1313,7 @@ public class Camera2BasicFragment extends Fragment
         requestBuilder.set(
         CaptureRequest.SENSOR_EXPOSURE_TIME,
                 // (long) exposureTimeInSeconds*1000000000 ); // 500000000L = 0.5 seconds
-                50000000L);
+                (long)(200000000L/isoBooster) );
     }
 
 
@@ -1315,12 +1380,30 @@ public class Camera2BasicFragment extends Fragment
 
     }
 
+    public static ByteBuffer cloneByteBuffer(final ByteBuffer original) {
+        // Create clone with same capacity as original.
+        final ByteBuffer clone = (original.isDirect()) ?
+                ByteBuffer.allocateDirect(original.capacity()) :
+                ByteBuffer.allocate(original.capacity());
+
+        // Create a read-only copy of the original.
+        // This allows reading from the original without modifying it.
+        final ByteBuffer readOnlyCopy = original.asReadOnlyBuffer();
+
+        // Flip and read from the original.
+        readOnlyCopy.flip();
+        clone.put(readOnlyCopy);
+
+        return clone;
+    }
+
     private static class DelayedImageSaver implements Runnable {
 
         /**
          * The JPEG image array
          */
-        private final Image[] mImageArray;
+        //private final Image[] mImageArray;
+        private ByteBuffer[] bufferArray;
 
         private final int mImageCount;
 
@@ -1329,8 +1412,9 @@ public class Camera2BasicFragment extends Fragment
          */
         private final File[] mFileArray;
 
-        DelayedImageSaver(Image[] image, File[] file, int imageCount) {
-            mImageArray = image;
+        DelayedImageSaver(ByteBuffer[] buffers, File[] file, int imageCount) {
+            //mImageArray = image;
+            bufferArray = buffers;
             mFileArray = file;
             mImageCount = imageCount;
         }
@@ -1339,9 +1423,8 @@ public class Camera2BasicFragment extends Fragment
         public void run() {
             for (int imgIdx=0;imgIdx<mImageCount;imgIdx++) {
                 File mFile=mFileArray[imgIdx];
-                Image mImage=mImageArray[imgIdx];
-
-                ByteBuffer buffer = mImage.getPlanes()[0].getBuffer();
+                //Image mImage=mImageArray[imgIdx];
+                ByteBuffer buffer = bufferArray[imgIdx];
                 byte[] bytes = new byte[buffer.remaining()];
                 buffer.get(bytes);
 
@@ -1359,7 +1442,7 @@ public class Camera2BasicFragment extends Fragment
                         e1.printStackTrace();
                     }
                 } finally {
-                    mImage.close();
+                    // mImage.close();
                     if (null != output) {
                         try {
                             output.close();

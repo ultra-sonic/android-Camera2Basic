@@ -19,5 +19,12 @@
     <string name="request_permission">This sample needs camera permission.</string>
     <string name="camera_error">This device doesn\'t support Camera2 API.</string>
     <string name="connect">connect</string>
-    <string name="hostAddressString">lightstage</string>
+    <string name="hostAddressString">192.168.43.203</string>
+
+    <string-array name="shooting_mode_array">
+        <item>single shot</item>
+        <item>no polarizer</item>
+        <item>cross-polarized</item>
+        <item>full-blown shoot</item>
+    </string-array>
 </resources>
