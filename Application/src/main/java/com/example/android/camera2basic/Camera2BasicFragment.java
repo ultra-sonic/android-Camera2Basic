@@ -71,6 +71,7 @@ import java.io.IOException;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -247,6 +248,7 @@ public class Camera2BasicFragment extends Fragment
     private ImageReader mImageReader;
     private Image[] mImageArray = new Image[40];
     private ByteBuffer[] bufferArray = new ByteBuffer[40];
+    static List<byte[]> byteList = new ArrayList<>();
 
     /**
      * This is the output file for our picture.
@@ -269,7 +271,12 @@ public class Camera2BasicFragment extends Fragment
 
             //NEW
             Image tmpImage=reader.acquireNextImage();
-            bufferArray[pictureCounter] = cloneByteBuffer( tmpImage.getPlanes()[0].getBuffer() );
+            //THIS cloneByteBuffer screws up the jpg - we need to duplicate the data after we read from the buffer maybe
+            //bufferArray[pictureCounter] = cloneByteBuffer( tmpImage.getPlanes()[0].getBuffer() );
+            ByteBuffer buffer = tmpImage.getPlanes()[0].getBuffer();
+            byte[] bytes = new byte[buffer.remaining()];
+            byteList.add( bytes );
+            buffer.get(bytes);
             tmpImage.close();
 
             // NEW AND OLD ALIKE
@@ -478,9 +485,17 @@ public class Camera2BasicFragment extends Fragment
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 //float minimumLens = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
-                float num = (3.3f - ((float)progress) * 0.45f); // pos 0=3.3f for faces - pos4=1.5f for sweethearts radkappe
+                float num = (3.3f - ((float)progress) * 0.45f / 1.5f ); // pos 0=3.3f for faces - pos4=1.5f for sweethearts radkappe
                 Log.d(TAG, "progress: " + Float.toString(num));
                 mPreviewRequestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, num);
+                mPreviewRequest = mPreviewRequestBuilder.build();
+                // do we need this?
+                try {
+                    mCaptureSession.setRepeatingRequest(mPreviewRequest,
+                            mCaptureCallback, mBackgroundHandler);
+                } catch (CameraAccessException e) {
+                    e.printStackTrace();
+                }
             }
         });
     }
@@ -944,7 +959,7 @@ public class Camera2BasicFragment extends Fragment
 
                     backToPreviewState(); // this was unlockFocus before but we just need to go back to preview state so I split it up to 2 functions
                     // unlockFocus(); // needed to uncomment this because we shoot a sequence and
-                    // therfore need the focus to stay the same
+                    // therefor need the focus to stay the same
                     if (lightstageOutStream != null)
                         try {
                             Log.d(TAG, "signaling lightstage to continue");
@@ -1032,20 +1047,6 @@ public class Camera2BasicFragment extends Fragment
                 new initiateRemoteControlFromPi().execute("");
                 break;
             }
-//            case R.id.seekBar: {
-//                float focus_distance=seekBarView.getProgress();
-//                try {
-//                    mPreviewRequestBuilder.set(
-//                            CaptureRequest.LENS_FOCUS_DISTANCE, 3.3f + focus_distance ); // 0f sets focus to infinity
-//                    mPreviewRequest = mPreviewRequestBuilder.build();
-//                    mCaptureSession.setRepeatingRequest(mPreviewRequest,
-//                            mCaptureCallback, mBackgroundHandler);
-//                } catch (CameraAccessException e) {
-//                    e.printStackTrace();
-//                }
-//                Log.d(TAG, "focus range: " + String.format("%f", focus_distance ));
-//                break;
-//            }
             case R.id.info: {
                 Activity activity = getActivity();
                 if (null != activity) {
@@ -1135,6 +1136,10 @@ public class Camera2BasicFragment extends Fragment
                     }
                     case "full-blown shoot": {
                         welcomeMessage=13;
+                        break;
+                    }
+                    case "do nothing - just shoot": {
+                        welcomeMessage=14;
                         break;
                     }
                 }
@@ -1383,6 +1388,7 @@ public class Camera2BasicFragment extends Fragment
         final ByteBuffer clone = (original.isDirect()) ?
                 ByteBuffer.allocateDirect(original.capacity()) :
                 ByteBuffer.allocate(original.capacity());
+        clone.order( ByteOrder.LITTLE_ENDIAN );
 
         // Create a read-only copy of the original.
         // This allows reading from the original without modifying it.
@@ -1422,15 +1428,14 @@ public class Camera2BasicFragment extends Fragment
             for (int imgIdx=0;imgIdx<mImageCount;imgIdx++) {
                 File mFile=mFileArray[imgIdx];
                 //Image mImage=mImageArray[imgIdx];
-                ByteBuffer buffer = bufferArray[imgIdx];
-                byte[] bytes = new byte[buffer.remaining()];
-                buffer.get(bytes);
-
+//                ByteBuffer buffer = bufferArray[imgIdx];
+//                byte[] bytes = new byte[buffer.remaining()];
+//                buffer.get(bytes);
                 FileOutputStream output = null;
 
                 try {
                     output = new FileOutputStream(mFile);
-                    output.write(bytes);
+                    output.write( byteList.get(imgIdx) );
                 } catch (IOException e) {
                     e.printStackTrace();
                     Log.d(TAG, "something went wrong during file save");
