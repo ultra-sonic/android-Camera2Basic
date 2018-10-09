@@ -34,7 +34,6 @@ import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
-import android.hardware.camera2.params.MeteringRectangle;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
@@ -109,6 +108,8 @@ public class Camera2BasicFragment extends Fragment
      */
     private static final int STATE_PREVIEW = 0;
 
+    private static final int LIGHTSTAGE_CONTINUE_NEXT_LIGHT = 3;
+
     /**
      * Camera state: Waiting for the focus to be locked.
      */
@@ -128,6 +129,12 @@ public class Camera2BasicFragment extends Fragment
      * Camera state: Picture was taken.
      */
     private static final int STATE_PICTURE_TAKEN = 4;
+
+    /**
+     * Camera state: Picture sequence is currently being taken.
+     */
+    private static final int STATE_BURST_SEQUENCE = 5;
+
 
     /**
      * Max preview width that is guaranteed by Camera2 API
@@ -261,25 +268,19 @@ public class Camera2BasicFragment extends Fragment
      * This a callback object for the {@link ImageReader}. "onImageAvailable" will be called when a
      * still image is ready to be saved.
      */
+
     private final ImageReader.OnImageAvailableListener mOnImageAvailableListener
             = new ImageReader.OnImageAvailableListener() {
 
         @Override
         public void onImageAvailable(ImageReader reader) {
-            //OLD
-            // mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage(), mFile));
-
-            //NEW
-            Image tmpImage=reader.acquireNextImage();
-            //THIS cloneByteBuffer screws up the jpg - we need to duplicate the data after we read from the buffer maybe
-            //bufferArray[pictureCounter] = cloneByteBuffer( tmpImage.getPlanes()[0].getBuffer() );
+            Log.d(TAG, "OnImageAvailableListener: SAVING ");
+            Image tmpImage = reader.acquireNextImage();
             ByteBuffer buffer = tmpImage.getPlanes()[0].getBuffer();
             byte[] bytes = new byte[buffer.remaining()];
-            byteList.add( bytes );
+            byteList.add(bytes);
             buffer.get(bytes);
             tmpImage.close();
-
-            // NEW AND OLD ALIKE
             pictureCounter++;
 
         }
@@ -327,6 +328,9 @@ public class Camera2BasicFragment extends Fragment
         private void process(CaptureResult result) {
 
             switch (mState) {
+                case STATE_BURST_SEQUENCE: {
+                    captureStillPicture();
+                }
                 case STATE_PREVIEW: {
                     // We have nothing to do when the camera preview is working normally.
                     break;
@@ -468,6 +472,8 @@ public class Camera2BasicFragment extends Fragment
         return inflater.inflate(R.layout.fragment_camera2_basic, container, false);
     }
 
+    private float focusDistance=3.3f;
+
     @Override
     public void onViewCreated(final View view, Bundle savedInstanceState) {
         view.findViewById(R.id.picture).setOnClickListener(this);
@@ -485,9 +491,9 @@ public class Camera2BasicFragment extends Fragment
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 //float minimumLens = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
-                float num = (3.3f - ((float)progress) * 0.45f / 1.5f ); // pos 0=3.3f for faces - pos4=1.5f for sweethearts radkappe
-                Log.d(TAG, "progress: " + Float.toString(num));
-                mPreviewRequestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, num);
+                focusDistance = (3.3f - ((float)progress) * 0.45f / 1.5f ); // pos 0=3.3f for faces - pos4=1.5f for sweethearts radkappe
+                Log.d(TAG, "setting LENS_FOCUS_DISTANCE for PREVIEW: " + Float.toString(focusDistance));
+                mPreviewRequestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, focusDistance);
                 mPreviewRequest = mPreviewRequestBuilder.build();
                 // do we need this?
                 try {
@@ -577,7 +583,7 @@ public class Camera2BasicFragment extends Fragment
                         Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)),
                         new CompareSizesByArea());
                 mImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
-                        ImageFormat.JPEG, /*maxImages*/2);
+                        ImageFormat.JPEG, /*maxImages*/1);
                 mImageReader.setOnImageAvailableListener(
                         mOnImageAvailableListener, mBackgroundHandler);
 
@@ -840,50 +846,16 @@ public class Camera2BasicFragment extends Fragment
         mTextureView.setTransform(matrix);
     }
 
+
+    private static boolean KEEP_FOCUS_LOCKED = false;
     /**
      * Initiate a still image capture.
      */
     private void takePicture() {
-        KEEP_FOCUS_LOCKED = true;
-        lockFocus();
-    }
-
-    private static boolean KEEP_FOCUS_LOCKED = false;
-
-    /**
-     * Lock the focus as the first step for a still image capture.
-     */
-    private void lockFocus() {
+        // KEEP_FOCUS_LOCKED = true;
         try {
-            if (KEEP_FOCUS_LOCKED) {
-                Log.d(TAG, "keeping focus - no locking");
-                // This is how to tell the camera to lock focus.
-                //mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, //null);
-                //         CaptureRequest.CONTROL_AF_TRIGGER_CANCEL);
-                mState = STATE_WAITING_NON_PRECAPTURE;// STATE_WAITING_PRECAPTURE;
-            }
-            else {
-                // This is how to tell the camera to lock focus.
-                Log.d(TAG, "locking focus");
-                MeteringRectangle focusAreaTouch = new MeteringRectangle(
-                        4096/2 -200,
-                        5488/2 -200 ,
-                        400 ,
-                        400 ,
-                        MeteringRectangle.METERING_WEIGHT_MAX - 1);
 
-
-                // https://gist.github.com/royshil/8c760c2485257c85a11cafd958548482#file-androidcamera2touchtofocus-java
-                mPreviewRequestBuilder.set(
-                        CaptureRequest.CONTROL_AF_REGIONS,
-                        new MeteringRectangle[]{focusAreaTouch});
-
-                mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
-                        CaptureRequest.CONTROL_AF_TRIGGER_START);
-                // Tell #mCaptureCallback to wait for the lock.
-                mState = STATE_WAITING_LOCK;
-            }
-
+            mState = STATE_WAITING_NON_PRECAPTURE;
 
             mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
                     mBackgroundHandler);
@@ -894,8 +866,8 @@ public class Camera2BasicFragment extends Fragment
 
             e.printStackTrace();
         }
-
     }
+
 
     /**
      * Run the precapture sequence for capturing a still image. This method should be called when
@@ -919,7 +891,7 @@ public class Camera2BasicFragment extends Fragment
      * Capture a still picture. This method should be called when we get a response in
      * {@link #mCaptureCallback} from both {@link #lockFocus()}.
      */
-    private float exposureTime=0.25f;
+    // private float exposureTime=0.25f;
 
     private void captureStillPicture() {
         try {
@@ -928,24 +900,36 @@ public class Camera2BasicFragment extends Fragment
                 return;
             }
             // This is the CaptureRequest.Builder that we use to take a picture.
-            final CaptureRequest.Builder captureBuilder =
-                    mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
-            captureBuilder.addTarget(mImageReader.getSurface());
+            final CaptureRequest.Builder captureRequestBuilder =
+                    mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_MANUAL );
+            captureRequestBuilder.addTarget(mImageReader.getSurface());
 
-            // Use the same AE and AF modes as the preview.
-            //captureBuilder.set(
-            //        CaptureRequest.CONTROL_AF_MODE,
-            //        CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-            //);
+            captureRequestBuilder.set(
+                    CaptureRequest.CONTROL_AWB_MODE,
+                    CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT );
 
+            // setManualMode(captureBuilder);
+            captureRequestBuilder.set(
+                    CaptureRequest.SENSOR_SENSITIVITY,
+                    (int) (200)); // *isoBooster
+            // setExposureTime(captureBuilder); // , exposureTime);
+            captureRequestBuilder.set(
+                    CaptureRequest.SENSOR_EXPOSURE_TIME,
+                    // (long) exposureTimeInSeconds*1000000000 );
+                    (long)(200000000L) ); // /isoBooster
+            // 500000000L = 0.5 seconds
 
-            // setAutoFlash(captureBuilder);
-            setManualMode(captureBuilder);
-            setExposureTime(captureBuilder, exposureTime);
+            //Set the JPEG quality here like so
+            captureRequestBuilder.set(
+                    CaptureRequest.JPEG_QUALITY,
+                    (byte)100);
+
+            Log.d(TAG, "setting LENS_FOCUS_DISTANCE for CAPTURE: " + Float.toString(focusDistance));
+            captureRequestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, focusDistance);
 
             // Orientation
             int rotation = activity.getWindowManager().getDefaultDisplay().getRotation();
-            captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, getOrientation(rotation));
+            captureRequestBuilder.set(CaptureRequest.JPEG_ORIENTATION, getOrientation(rotation));
 
             CameraCaptureSession.CaptureCallback CaptureCallback
                     = new CameraCaptureSession.CaptureCallback() {
@@ -954,16 +938,11 @@ public class Camera2BasicFragment extends Fragment
                 public void onCaptureCompleted(@NonNull CameraCaptureSession session,
                                                @NonNull CaptureRequest request,
                                                @NonNull TotalCaptureResult result) {
-                    // showToast("Saved: " + mFile);
-                    // Log.d(TAG, mFile.toString());
 
-                    backToPreviewState(); // this was unlockFocus before but we just need to go back to preview state so I split it up to 2 functions
-                    // unlockFocus(); // needed to uncomment this because we shoot a sequence and
-                    // therefor need the focus to stay the same
                     if (lightstageOutStream != null)
                         try {
                             Log.d(TAG, "signaling lightstage to continue");
-                            lightstageOutStream.writeByte(3);
+                            lightstageOutStream.writeByte( LIGHTSTAGE_CONTINUE_NEXT_LIGHT );
 
                         } catch (IOException e) {
                             e.printStackTrace();
@@ -977,7 +956,7 @@ public class Camera2BasicFragment extends Fragment
             mCaptureSession.stopRepeating();
             //mCaptureSession.abortCaptures();
             //mCaptureSession.close(); // instead of capture
-            mCaptureSession.capture(captureBuilder.build(), CaptureCallback, null);
+            mCaptureSession.capture(captureRequestBuilder.build(), CaptureCallback, null);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
@@ -1005,9 +984,9 @@ public class Camera2BasicFragment extends Fragment
         try {
             // keep focus locked!!!
             // This is how to tell the camera to keep the focus locked.
-            mPreviewRequestBuilder.set(
-                    CaptureRequest.CONTROL_AF_TRIGGER,
-                    CaptureRequest.CONTROL_AF_TRIGGER_IDLE);
+//            mPreviewRequestBuilder.set(
+//                    CaptureRequest.CONTROL_AF_TRIGGER,
+//                    CaptureRequest.CONTROL_AF_TRIGGER_IDLE);
 
             mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
                     mBackgroundHandler);
@@ -1020,7 +999,7 @@ public class Camera2BasicFragment extends Fragment
         }
     }
 
-    private void unlockFocus() {
+   /* private void unlockFocus() {
         try {
             // Reset the auto-focus trigger
             mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
@@ -1035,15 +1014,14 @@ public class Camera2BasicFragment extends Fragment
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
-    }
+    }*/
 
 
     @Override
     public void onClick(View view) {
-        Log.d(TAG, String.format( "%04d",  view.getId() ) );
-        Log.d(TAG, String.format( "%04d",  R.id.seekBar ) );
         switch (view.getId()) {
             case R.id.picture: {
+                Log.d(TAG, "SHOOT button pressed." );
                 new initiateRemoteControlFromPi().execute("");
                 break;
             }
@@ -1176,8 +1154,6 @@ public class Camera2BasicFragment extends Fragment
                 Log.d(TAG, "timestamp: " + pictureSession );
                 pictureCounter=0;
 
-                lockFocus();
-
                 boolean pmd_recording=false;
                 while (true) {
                     int command = lightstageInputStream.readByte();
@@ -1190,15 +1166,16 @@ public class Camera2BasicFragment extends Fragment
                             pmd_recording=true;
                         }
 
-                        // mFile = new File(getActivity().getExternalFilesDir(null), pictureSession + "_" + String.format("%04d", pictureCounter) + ".jpg");
-
-                        //exposureTime=0.1f;
-
                         try {
+                            // Log.d( TAG, "taking picture " + String.format("%04d", pictureCounter));
+                            Log.d( TAG, "taking picture..." );
+                            Thread.sleep(100); // stupid hack
                             takePicture();
-                            KEEP_FOCUS_LOCKED=true;
+                            Thread.sleep(100); // stupid hack
+                            // pictureCounter++;
                         }
                         catch (Exception e) {
+                            backToPreviewState();
                             e.printStackTrace();
                             Log.d(TAG, "something went wrong during takePicture");
                             try {
@@ -1210,13 +1187,14 @@ public class Camera2BasicFragment extends Fragment
                                 e1.printStackTrace();
                             }
                         }
-                        //exposureTime=0.2f; // bracketing
-                        //takePicture();
-                        Log.d( TAG, "taking picture " + String.format("%04d", pictureCounter));
-                    } else if (command == -1) {
-                        unlockFocus();
-                        KEEP_FOCUS_LOCKED = false;
 
+                        //exposureTime=0.2f; // bracketing
+
+
+                    } else if (command == -1) {
+                        // GIVE THE LAST IMAGE A LITTLE MORE TIME TO FINISH WRITING - otherwise we might loose the last captured image
+                        Log.d(TAG, "Waiting 500ms for last image to be saved...");
+                        Thread.sleep(500);
                         // delayed write all frames:
                         for (int imgIdx=0;imgIdx<pictureCounter;imgIdx++) {
                             mFile = new File(getActivity().getExternalFilesDir(null), pictureSession + "_" + String.format("%04d", imgIdx) + ".jpg");
@@ -1250,11 +1228,12 @@ public class Camera2BasicFragment extends Fragment
                         lightstageOutStream.close();
                         lightstageClientSocket.close(); // close is the preferred way over shutdown
 
+                        backToPreviewState();
+
                         Log.d( TAG,"clean exit");
                         return null;
                     }
                 }
-
 
             } catch (UnknownHostException e) {
                 System.err.println("Don't know about host: " + hostname);
@@ -1262,6 +1241,8 @@ public class Camera2BasicFragment extends Fragment
                 System.err.println("Couldn't get I/O for the connection to: " + hostname);
                 System.err.println(e);
 
+            } catch (InterruptedException e) {
+                e.printStackTrace();
             }
 //            TextView txt = (TextView) findViewById(R.id.output);
 //            txt.setText("Executed");
@@ -1276,7 +1257,7 @@ public class Camera2BasicFragment extends Fragment
                     CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
         }
     }
-    private long isoBooster=4L;
+    private long isoBooster=1L;
     private void setManualMode(CaptureRequest.Builder requestBuilder) {
 
         requestBuilder.set(
@@ -1297,26 +1278,27 @@ public class Camera2BasicFragment extends Fragment
 
         requestBuilder.set(
                 CaptureRequest.SENSOR_SENSITIVITY,
-                (int) (200*isoBooster));
+                (int) (200)); // *isoBooster
 
         //Set the JPEG quality here like so
         requestBuilder.set(
                 CaptureRequest.JPEG_QUALITY,
                 (byte)100);
 
-//        requestBuilder.set(
-//                CaptureRequest.LENS_FOCUS_DISTANCE,
-//                3.3f + seekBarView.getProgress() ); // 0.0f sets focus to infinity
+        // requestBuilder.set(
+        //        CaptureRequest.LENS_FOCUS_DISTANCE,
+        //        focusDistance );
 
 
 
     }
 
-    private void setExposureTime(CaptureRequest.Builder requestBuilder, float exposureTimeInSeconds) {
+    private void setExposureTime(CaptureRequest.Builder requestBuilder) { //, float exposureTimeInSeconds) {
         requestBuilder.set(
         CaptureRequest.SENSOR_EXPOSURE_TIME,
-                // (long) exposureTimeInSeconds*1000000000 ); // 500000000L = 0.5 seconds
-                (long)(200000000L/isoBooster) );
+                // (long) exposureTimeInSeconds*1000000000 );
+                (long)(200000000L) ); // /isoBooster
+                    // 500000000L = 0.5 seconds
     }
 
 
@@ -1324,15 +1306,15 @@ public class Camera2BasicFragment extends Fragment
     /**
      * Saves a JPEG {@link Image} into the specified {@link File}.
      */
-    private static class ImageSaver implements Runnable {
+    /*private static class ImageSaver implements Runnable {
 
-        /**
+        *//**
          * The JPEG image
-         */
+         *//*
         private final Image mImage;
-        /**
+        *//**
          * The file we save the image into.
-         */
+         *//*
         private final File mFile;
 
         ImageSaver(Image image, File file) {
@@ -1381,7 +1363,7 @@ public class Camera2BasicFragment extends Fragment
                 Log.e(TAG, "lightstage Outputstream not available");
         }
 
-    }
+    }*/
 
     public static ByteBuffer cloneByteBuffer(final ByteBuffer original) {
         // Create clone with same capacity as original.
@@ -1454,7 +1436,7 @@ public class Camera2BasicFragment extends Fragment
                         }
                     }
                 }
-                if (lightstageOutStream!=null)
+                /*if (lightstageOutStream!=null)
                     try {
                         Log.d(TAG, "signaling lightstage to continue");
                         lightstageOutStream.writeByte(3);
@@ -1463,7 +1445,7 @@ public class Camera2BasicFragment extends Fragment
                         e.printStackTrace();
                     }
                 else
-                    Log.e(TAG, "lightstage Outputstream not available");
+                    Log.e(TAG, "lightstage Outputstream not available");*/
             }
         }
 
