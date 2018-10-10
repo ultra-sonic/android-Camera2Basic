@@ -256,7 +256,6 @@ public class Camera2BasicFragment extends Fragment
      */
     private ImageReader mImageReader;
     private Image[] mImageArray = new Image[40];
-    // private ByteBuffer[] bufferArray = new ByteBuffer[40];
     static List<byte[]> byteList = new ArrayList<>();
 
     /**
@@ -1429,6 +1428,7 @@ public class Camera2BasicFragment extends Fragment
                 try {
                     output = new FileOutputStream(mFile);
                     output.write( byteList.get(imgIdx) );
+                    byteList.set( imgIdx, null ); // clear the element, but do not remove it
                 } catch (IOException e) {
                     e.printStackTrace();
                     Log.d(TAG, "something went wrong during file save");
