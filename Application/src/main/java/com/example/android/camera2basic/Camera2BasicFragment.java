@@ -81,6 +81,8 @@ import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
+
+
 public class Camera2BasicFragment extends Fragment
         implements View.OnClickListener, ActivityCompat.OnRequestPermissionsResultCallback {
 
@@ -254,7 +256,7 @@ public class Camera2BasicFragment extends Fragment
      */
     private ImageReader mImageReader;
     private Image[] mImageArray = new Image[40];
-    private ByteBuffer[] bufferArray = new ByteBuffer[40];
+    // private ByteBuffer[] bufferArray = new ByteBuffer[40];
     static List<byte[]> byteList = new ArrayList<>();
 
     /**
@@ -1054,11 +1056,29 @@ public class Camera2BasicFragment extends Fragment
     private static DataInputStream lightstageInputStream = null;
     private static DataInputStream pmdInputStream = null;
     private int pictureCounter=0;
+    private int nextPictureToStartWith =0;
     private String pictureSession;
 
 
     private class initiateRemoteControlFromPi extends AsyncTask<String, Void, String> {
 
+
+        private void callDelayedImageSaver() {
+            // GIVE THE LAST IMAGE A LITTLE MORE TIME TO FINISH WRITING - otherwise we might loose the last captured image
+            Log.d(TAG, "Waiting 500ms for last image to be saved...");
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            // delayed write all frames:
+            for (int imgIdx = nextPictureToStartWith; imgIdx<pictureCounter; imgIdx++) {
+                mFile = new File(getActivity().getExternalFilesDir(null), pictureSession + "_" + String.format("%04d", imgIdx) + ".jpg");
+                mFileArray[imgIdx] = mFile;
+            }
+            mBackgroundHandler.post(new DelayedImageSaver(mFileArray,nextPictureToStartWith, pictureCounter));
+            nextPictureToStartWith = pictureCounter;
+        }
 
         @Override
         protected String doInBackground(String... params) {
@@ -1101,23 +1121,23 @@ public class Camera2BasicFragment extends Fragment
                 Integer welcomeMessage=-1;
                 switch (shotMode) {
                     case "single shot": {
-                        welcomeMessage=10;
+                        welcomeMessage=messageCodes.LIGHTSTAGE_SHOT_MODE_SINGLE_SHOT.getCode();
                         break;
                     }
                     case "no polarizer": {
-                        welcomeMessage=11;
+                        welcomeMessage=messageCodes.LIGHTSTAGE_SHOT_MODE_NO_POLARIZER.getCode();;
                         break;
                     }
                     case "cross-polarized": {
-                        welcomeMessage=12;
+                        welcomeMessage=messageCodes.LIGHTSTAGE_SHOT_MODE_CROSS_POLARIZED_ONLY.getCode();;
                         break;
                     }
                     case "full-blown shoot": {
-                        welcomeMessage=13;
+                        welcomeMessage=messageCodes.LIGHTSTAGE_SHOT_MODE_FULL_BLOWN.getCode();;
                         break;
                     }
                     case "do nothing - just shoot": {
-                        welcomeMessage=14;
+                        welcomeMessage=messageCodes.LIGHTSTAGE_SHOT_MODE_DO_NOTHING.getCode();;
                         break;
                     }
                 }
@@ -1134,7 +1154,7 @@ public class Camera2BasicFragment extends Fragment
 
                 Log.d(TAG, "waiting for lightstage");
 
-                if (lightstageInputStream.readByte()==welcomeMessage) {
+                if (lightstageInputStream.readByte()==welcomeMessage) { // we are expecting the same message back that we just sent
                     Log.d(TAG, "lightstage ready!");
                 }
                 else {
@@ -1156,9 +1176,9 @@ public class Camera2BasicFragment extends Fragment
 
                 boolean pmd_recording=false;
                 while (true) {
-                    int command = lightstageInputStream.readByte();
+                    int messageFromLightstage = lightstageInputStream.readByte();
 
-                    if (command == 2) {
+                    if (messageFromLightstage == messageCodes.ANDROID_START_CAPTURE.getCode() ) {
                         if (pmd_present && pmd_recording==false) {
                             // start recording on pmd
                             pmdOutStream.writeByte(2); // start recording
@@ -1190,17 +1210,15 @@ public class Camera2BasicFragment extends Fragment
 
                         //exposureTime=0.2f; // bracketing
 
+                    } else if (messageFromLightstage == messageCodes.LIGHTSTAGE_POLARIZER_STARTS_MOVING.getCode() ) {
+                        // intermediate writing of frames because lightstage does some physical
+                        // movemnet which gives us some time to do something useful to prevent
+                        // running out of memory
+                        callDelayedImageSaver();
+                        lightstageOutStream.writeByte(messageCodes.ANDROID_FINISHED_WRITING_IMAGES.getCode() );
 
-                    } else if (command == -1) {
-                        // GIVE THE LAST IMAGE A LITTLE MORE TIME TO FINISH WRITING - otherwise we might loose the last captured image
-                        Log.d(TAG, "Waiting 500ms for last image to be saved...");
-                        Thread.sleep(500);
-                        // delayed write all frames:
-                        for (int imgIdx=0;imgIdx<pictureCounter;imgIdx++) {
-                            mFile = new File(getActivity().getExternalFilesDir(null), pictureSession + "_" + String.format("%04d", imgIdx) + ".jpg");
-                            mFileArray[imgIdx] = mFile;
-                        }
-                        mBackgroundHandler.post(new DelayedImageSaver(bufferArray,mFileArray,pictureCounter));
+                    } else if (messageFromLightstage == messageCodes.CLEAN_EXIT.getCode() ) {
+                        callDelayedImageSaver();
 
                         if (pmd_present) {
                             pmdOutStream.writeByte(-1);
@@ -1241,11 +1259,7 @@ public class Camera2BasicFragment extends Fragment
                 System.err.println("Couldn't get I/O for the connection to: " + hostname);
                 System.err.println(e);
 
-            } catch (InterruptedException e) {
-                e.printStackTrace();
             }
-//            TextView txt = (TextView) findViewById(R.id.output);
-//            txt.setText("Executed");
             return null;
         }
     }
@@ -1389,30 +1403,27 @@ public class Camera2BasicFragment extends Fragment
          * The JPEG image array
          */
         //private final Image[] mImageArray;
-        private ByteBuffer[] bufferArray;
+        //private ByteBuffer[] bufferArray;
 
-        private final int mImageCount;
+        private final int mNextPictureToStartWith,mImageCount;
 
         /**
          * The file we save the image into - array
          */
         private final File[] mFileArray;
 
-        DelayedImageSaver(ByteBuffer[] buffers, File[] file, int imageCount) {
+        DelayedImageSaver( File[] file, int nextPictureToStartWith, int imageCount) {
             //mImageArray = image;
-            bufferArray = buffers;
+            //bufferArray = buffers;
             mFileArray = file;
+            mNextPictureToStartWith=nextPictureToStartWith;
             mImageCount = imageCount;
         }
 
         @Override
         public void run() {
-            for (int imgIdx=0;imgIdx<mImageCount;imgIdx++) {
+            for (int imgIdx=mNextPictureToStartWith;imgIdx<mImageCount;imgIdx++) {
                 File mFile=mFileArray[imgIdx];
-                //Image mImage=mImageArray[imgIdx];
-//                ByteBuffer buffer = bufferArray[imgIdx];
-//                byte[] bytes = new byte[buffer.remaining()];
-//                buffer.get(bytes);
                 FileOutputStream output = null;
 
                 try {
@@ -1427,7 +1438,6 @@ public class Camera2BasicFragment extends Fragment
                         e1.printStackTrace();
                     }
                 } finally {
-                    // mImage.close();
                     if (null != output) {
                         try {
                             output.close();
@@ -1436,16 +1446,6 @@ public class Camera2BasicFragment extends Fragment
                         }
                     }
                 }
-                /*if (lightstageOutStream!=null)
-                    try {
-                        Log.d(TAG, "signaling lightstage to continue");
-                        lightstageOutStream.writeByte(3);
-
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                else
-                    Log.e(TAG, "lightstage Outputstream not available");*/
             }
         }
 
