@@ -80,8 +80,8 @@ import java.util.Date;
 import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-
-
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.Lock;
 
 public class Camera2BasicFragment extends Fragment
         implements View.OnClickListener, ActivityCompat.OnRequestPermissionsResultCallback {
@@ -109,8 +109,6 @@ public class Camera2BasicFragment extends Fragment
      * Camera state: Showing camera preview.
      */
     private static final int STATE_PREVIEW = 0;
-
-    private static final int LIGHTSTAGE_CONTINUE_NEXT_LIGHT = 3;
 
     /**
      * Camera state: Waiting for the focus to be locked.
@@ -255,7 +253,7 @@ public class Camera2BasicFragment extends Fragment
      * An {@link ImageReader} that handles still image capture.
      */
     private ImageReader mImageReader;
-    private Image[] mImageArray = new Image[40];
+    // private Image[] mImageArray = new Image[40];
     static List<byte[]> byteList = new ArrayList<>();
 
     /**
@@ -264,6 +262,8 @@ public class Camera2BasicFragment extends Fragment
     private File mFile;
     private File[] mFileArray = new File[40];
 
+
+    private final ReentrantLock saveImageLock = new ReentrantLock();
 
     /**
      * This a callback object for the {@link ImageReader}. "onImageAvailable" will be called when a
@@ -275,14 +275,31 @@ public class Camera2BasicFragment extends Fragment
 
         @Override
         public void onImageAvailable(ImageReader reader) {
-            Log.d(TAG, "OnImageAvailableListener: SAVING ");
-            Image tmpImage = reader.acquireNextImage();
-            ByteBuffer buffer = tmpImage.getPlanes()[0].getBuffer();
-            byte[] bytes = new byte[buffer.remaining()];
-            byteList.add(bytes);
-            buffer.get(bytes);
-            tmpImage.close();
-            pictureCounter++;
+            saveImageLock.lock();
+            try {
+                Log.d(TAG, "OnImageAvailableListener: SAVING ");
+                Image tmpImage = reader.acquireNextImage();
+                ByteBuffer buffer = tmpImage.getPlanes()[0].getBuffer();
+                byte[] bytes = new byte[buffer.remaining()];
+                byteList.add(bytes);
+                buffer.get(bytes);
+                tmpImage.close();
+                pictureCounter++;
+
+                if (lightstageOutStream != null)
+                    try {
+                        Log.d(TAG, "signaling lightstage to continue");
+                        lightstageOutStream.writeByte( messageCodes.LIGHTSTAGE_CONTINUE_NEXT_LIGHT.getCode() );
+
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                else
+                    Log.e(TAG, "lightstage Outputstream not available");
+            }
+            finally {
+                saveImageLock.unlock();
+            }
 
         }
 
@@ -940,7 +957,7 @@ public class Camera2BasicFragment extends Fragment
                                                @NonNull CaptureRequest request,
                                                @NonNull TotalCaptureResult result) {
 
-                    if (lightstageOutStream != null)
+                    /*if (lightstageOutStream != null)
                         try {
                             Log.d(TAG, "signaling lightstage to continue");
                             lightstageOutStream.writeByte( LIGHTSTAGE_CONTINUE_NEXT_LIGHT );
@@ -950,7 +967,7 @@ public class Camera2BasicFragment extends Fragment
                         }
                     else
                         Log.e(TAG, "lightstage Outputstream not available");
-
+                    */
                 }
             };
 
@@ -1000,24 +1017,6 @@ public class Camera2BasicFragment extends Fragment
         }
     }
 
-   /* private void unlockFocus() {
-        try {
-            // Reset the auto-focus trigger
-            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
-                    CaptureRequest.CONTROL_AF_TRIGGER_CANCEL);
-
-            mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
-                    mBackgroundHandler);
-            // After this, the camera will go back to the normal state of preview.
-            mState = STATE_PREVIEW;
-            mCaptureSession.setRepeatingRequest(mPreviewRequest, mCaptureCallback,
-                    mBackgroundHandler);
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
-        }
-    }*/
-
-
     @Override
     public void onClick(View view) {
         switch (view.getId()) {
@@ -1063,20 +1062,19 @@ public class Camera2BasicFragment extends Fragment
 
 
         private void callDelayedImageSaver() {
-            // GIVE THE LAST IMAGE A LITTLE MORE TIME TO FINISH WRITING - otherwise we might loose the last captured image
-            Log.d(TAG, "Waiting 500ms for last image to be saved...");
+            saveImageLock.lock();
             try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+                // delayed write all frames:
+                for (int imgIdx = nextPictureToStartWith; imgIdx<pictureCounter; imgIdx++) {
+                    mFile = new File(getActivity().getExternalFilesDir(null), pictureSession + "_" + String.format("%04d", imgIdx) + ".jpg");
+                    mFileArray[imgIdx] = mFile;
+                }
+                mBackgroundHandler.post(new DelayedImageSaver(mFileArray,nextPictureToStartWith, pictureCounter));
+                nextPictureToStartWith = pictureCounter;
             }
-            // delayed write all frames:
-            for (int imgIdx = nextPictureToStartWith; imgIdx<pictureCounter; imgIdx++) {
-                mFile = new File(getActivity().getExternalFilesDir(null), pictureSession + "_" + String.format("%04d", imgIdx) + ".jpg");
-                mFileArray[imgIdx] = mFile;
+            finally {
+                saveImageLock.unlock();
             }
-            mBackgroundHandler.post(new DelayedImageSaver(mFileArray,nextPictureToStartWith, pictureCounter));
-            nextPictureToStartWith = pictureCounter;
         }
 
         @Override
@@ -1196,11 +1194,11 @@ public class Camera2BasicFragment extends Fragment
                         catch (Exception e) {
                             backToPreviewState();
                             e.printStackTrace();
-                            Log.d(TAG, "something went wrong during takePicture");
+                            Log.e(TAG, messageCodes.ANDROID_ERROR_TAKING_PICTURE.getDescription());
                             try {
-                                lightstageOutStream.writeByte(-2);
+                                lightstageOutStream.writeByte( messageCodes.ANDROID_ERROR_TAKING_PICTURE.getCode() );
                                 if (pmd_present)
-                                    pmdOutStream.writeByte(-2);
+                                    pmdOutStream.writeByte( messageCodes.ANDROID_ERROR_TAKING_PICTURE.getCode() );
                             }
                             catch (IOException e1) {
                                 e1.printStackTrace();
@@ -1209,12 +1207,12 @@ public class Camera2BasicFragment extends Fragment
 
                         //exposureTime=0.2f; // bracketing
 
-                    } else if (messageFromLightstage == messageCodes.LIGHTSTAGE_POLARIZER_STARTS_MOVING.getCode() ) {
+                    } else if (messageFromLightstage == messageCodes.LIGHTSTAGE_POLARIZER_STARTS_ROTATING.getCode() ) {
                         // intermediate writing of frames because lightstage does some physical
                         // movemnet which gives us some time to do something useful to prevent
                         // running out of memory
                         callDelayedImageSaver();
-                        lightstageOutStream.writeByte(messageCodes.ANDROID_FINISHED_WRITING_IMAGES.getCode() );
+                        lightstageOutStream.writeByte(messageCodes.ANDROID_FINISHED_WRITING_IMAGES.getCode());
 
                     } else if (messageFromLightstage == messageCodes.CLEAN_EXIT.getCode() ) {
                         callDelayedImageSaver();
@@ -1429,6 +1427,7 @@ public class Camera2BasicFragment extends Fragment
                     output = new FileOutputStream(mFile);
                     output.write( byteList.get(imgIdx) );
                     byteList.set( imgIdx, null ); // clear the element, but do not remove it
+                    Log.d(TAG, "cleared image" + Integer.toString(imgIdx));
                 } catch (IOException e) {
                     e.printStackTrace();
                     Log.d(TAG, "something went wrong during file save");
