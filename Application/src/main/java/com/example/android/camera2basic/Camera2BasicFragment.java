@@ -1187,9 +1187,9 @@ public class Camera2BasicFragment extends Fragment
                         try {
                             // Log.d( TAG, "taking picture " + String.format("%04d", pictureCounter));
                             Log.d( TAG, "taking picture..." );
-                            Thread.sleep(100); // stupid hack
+                            //Thread.sleep(100); // stupid hack
                             takePicture();
-                            Thread.sleep(100); // stupid hack
+                            //Thread.sleep(100); // stupid hack
                             // pictureCounter++;
                         }
                         catch (Exception e) {
