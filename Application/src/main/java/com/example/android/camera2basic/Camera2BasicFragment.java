@@ -1170,6 +1170,7 @@ public class Camera2BasicFragment extends Fragment
                 pictureSession = getCurrentTimeStamp();
                 Log.d(TAG, "timestamp: " + pictureSession );
                 pictureCounter=0;
+                byteList.clear();
 
                 boolean pmd_recording=false;
                 while (true) {
@@ -1427,7 +1428,7 @@ public class Camera2BasicFragment extends Fragment
                     output = new FileOutputStream(mFile);
                     output.write( byteList.get(imgIdx) );
                     byteList.set( imgIdx, null ); // clear the element, but do not remove it
-                    Log.d(TAG, "cleared image" + Integer.toString(imgIdx));
+                    Log.d(TAG, "cleared image: " + Integer.toString(imgIdx));
                 } catch (IOException e) {
                     e.printStackTrace();
                     Log.d(TAG, "something went wrong during file save");
