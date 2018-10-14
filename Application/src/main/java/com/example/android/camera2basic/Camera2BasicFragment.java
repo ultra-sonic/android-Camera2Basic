@@ -285,6 +285,7 @@ public class Camera2BasicFragment extends Fragment
                 buffer.get(bytes);
                 tmpImage.close();
                 pictureCounter++;
+                exposureMultiplier=1; // RESET exposureMultiplier every frame
 
                 if (lightstageOutStream != null)
                     try {
@@ -931,10 +932,12 @@ public class Camera2BasicFragment extends Fragment
                     CaptureRequest.SENSOR_SENSITIVITY,
                     (int) (200)); // *isoBooster
             // setExposureTime(captureBuilder); // , exposureTime);
+
+            Log.d(TAG, "Exposure muliplier: " + Integer.toString( exposureMultiplier ));
             captureRequestBuilder.set(
                     CaptureRequest.SENSOR_EXPOSURE_TIME,
                     // (long) exposureTimeInSeconds*1000000000 );
-                    (long)(200000000L) ); // /isoBooster
+                    (long)(200000000L * exposureMultiplier ) ); // /isoBooster
             // 500000000L = 0.5 seconds
 
             //Set the JPEG quality here like so
@@ -1057,6 +1060,8 @@ public class Camera2BasicFragment extends Fragment
     private int nextPictureToStartWith =0;
     private String pictureSession;
 
+    private int exposureMultiplier=1;
+
 
     private class initiateRemoteControlFromPi extends AsyncTask<String, Void, String> {
 
@@ -1119,6 +1124,10 @@ public class Camera2BasicFragment extends Fragment
                 switch (shotMode) {
                     case "single shot": {
                         welcomeMessage=messageCodes.LIGHTSTAGE_SHOT_MODE_SINGLE_SHOT.getCode();
+                        break;
+                    }
+                    case "single LED - substance style": {
+                        welcomeMessage=messageCodes.LIGHTSTAGE_SHOT_MODE_SINGLE_LED_TURNAROUND.getCode();;
                         break;
                     }
                     case "no polarizer": {
@@ -1189,8 +1198,6 @@ public class Camera2BasicFragment extends Fragment
                             Log.d( TAG, "taking picture..." );
                             //Thread.sleep(100); // stupid hack
                             takePicture();
-                            //Thread.sleep(100); // stupid hack
-                            // pictureCounter++;
                         }
                         catch (Exception e) {
                             backToPreviewState();
@@ -1205,8 +1212,10 @@ public class Camera2BasicFragment extends Fragment
                                 e1.printStackTrace();
                             }
                         }
-
-                        //exposureTime=0.2f; // bracketing
+                    } else if (messageFromLightstage == messageCodes.ANDROID_ADJUST_EXPOURE.getCode() ) {
+                        exposureMultiplier = lightstageInputStream.readByte();
+                        //ACKNOLEDGE TO LIGHTSTAGE with same message
+                        lightstageOutStream.writeByte( exposureMultiplier );
 
                     } else if (messageFromLightstage == messageCodes.LIGHTSTAGE_POLARIZER_STARTS_ROTATING.getCode() ) {
                         // intermediate writing of frames because lightstage does some physical
@@ -1305,13 +1314,6 @@ public class Camera2BasicFragment extends Fragment
 
     }
 
-    private void setExposureTime(CaptureRequest.Builder requestBuilder) { //, float exposureTimeInSeconds) {
-        requestBuilder.set(
-        CaptureRequest.SENSOR_EXPOSURE_TIME,
-                // (long) exposureTimeInSeconds*1000000000 );
-                (long)(200000000L) ); // /isoBooster
-                    // 500000000L = 0.5 seconds
-    }
 
 
 
