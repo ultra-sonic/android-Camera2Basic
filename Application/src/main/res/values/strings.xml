@@ -23,8 +23,7 @@
 
     <string-array name="shooting_mode_array">
         <item>single shot</item>
-        <item>no polarizer</item>
-        <item>cross-polarized</item>
+        <item>single LED - substance style</item>
         <item>full-blown shoot</item>
         <item>do nothing - just shoot</item>
     </string-array>
