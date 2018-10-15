@@ -941,9 +941,10 @@ public class Camera2BasicFragment extends Fragment
             // 500000000L = 0.5 seconds
 
             //Set the JPEG quality here like so
+            byte quality = 100;
             captureRequestBuilder.set(
                     CaptureRequest.JPEG_QUALITY,
-                    (byte)100);
+                    quality );
 
             Log.d(TAG, "setting LENS_FOCUS_DISTANCE for CAPTURE: " + Float.toString(focusDistance));
             captureRequestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, focusDistance);
@@ -1270,51 +1271,6 @@ public class Camera2BasicFragment extends Fragment
             return null;
         }
     }
-
-
-    private void setAutoFlash(CaptureRequest.Builder requestBuilder) {
-        if (mFlashSupported) {
-            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
-                    CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
-        }
-    }
-    private long isoBooster=1L;
-    private void setManualMode(CaptureRequest.Builder requestBuilder) {
-
-        requestBuilder.set(
-                CaptureRequest.CONTROL_MODE,
-                CaptureRequest.CONTROL_MODE_OFF);
-
-//
-//            requestBuilder.set(
-//                    CaptureRequest.CONTROL_AE_MODE,
-//                    CaptureRequest.CONTROL_AE_MODE_OFF);
-        requestBuilder.set(
-                CaptureRequest.FLASH_MODE,
-                CaptureRequest.FLASH_MODE_OFF);
-
-//        requestBuilder.set(
-//                CaptureRequest.CONTROL_AF_TRIGGER,
-//                CameraMetadata.CONTROL_AF_TRIGGER_IDLE);
-
-        requestBuilder.set(
-                CaptureRequest.SENSOR_SENSITIVITY,
-                (int) (200)); // *isoBooster
-
-        //Set the JPEG quality here like so
-        requestBuilder.set(
-                CaptureRequest.JPEG_QUALITY,
-                (byte)100);
-
-        // requestBuilder.set(
-        //        CaptureRequest.LENS_FOCUS_DISTANCE,
-        //        focusDistance );
-
-
-
-    }
-
-
 
 
     /**
