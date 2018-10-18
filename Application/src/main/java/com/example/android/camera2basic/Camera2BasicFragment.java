@@ -36,6 +36,7 @@ import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.CaptureResult;
+import android.hardware.camera2.DngCreator;
 import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
@@ -62,11 +63,13 @@ import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.Toast;
 
+import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
@@ -81,7 +84,6 @@ import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.concurrent.locks.Lock;
 
 public class Camera2BasicFragment extends Fragment
         implements View.OnClickListener, ActivityCompat.OnRequestPermissionsResultCallback {
@@ -253,6 +255,7 @@ public class Camera2BasicFragment extends Fragment
      * An {@link ImageReader} that handles still image capture.
      */
     private ImageReader mImageReader;
+    private ImageReader mRawImageReader;
     // private Image[] mImageArray = new Image[40];
     static List<byte[]> byteList = new ArrayList<>();
 
@@ -260,30 +263,34 @@ public class Camera2BasicFragment extends Fragment
      * This is the output file for our picture.
      */
     private File mFile;
-    private File[] mFileArray = new File[40];
+    private File[] mFileArray = new File[99];
+    private File[] mRawFileArray = new File[99];
+    private ByteArrayOutputStream[] rawByteArrayOutputStreamArray = new ByteArrayOutputStream[99];
 
+    private CameraCharacteristics mCameraCharacteristics;
+    private CaptureResult[] mCaptureResult = new CaptureResult[99];
 
-    private final ReentrantLock saveImageLock = new ReentrantLock();
+    private final ReentrantLock saveJpegLock = new ReentrantLock();
+    private final ReentrantLock saveRawLock = new ReentrantLock();
 
     /**
      * This a callback object for the {@link ImageReader}. "onImageAvailable" will be called when a
      * still image is ready to be saved.
      */
 
-    private final ImageReader.OnImageAvailableListener mOnImageAvailableListener
+    private final ImageReader.OnImageAvailableListener mOnRawImageAvailableListener
             = new ImageReader.OnImageAvailableListener() {
 
         @Override
         public void onImageAvailable(ImageReader reader) {
-            saveImageLock.lock();
+            saveRawLock.lock();
             try {
-                Log.d(TAG, "OnImageAvailableListener: SAVING ");
+                Log.d(TAG, "OnRawImageAvailableListener: SAVING ");
+                DngCreator dngCreator = new DngCreator( mCameraCharacteristics, mCaptureResult[ pictureCounter ] );
                 Image tmpImage = reader.acquireNextImage();
-                ByteBuffer buffer = tmpImage.getPlanes()[0].getBuffer();
-                byte[] bytes = new byte[buffer.remaining()];
-                byteList.add(bytes);
-                buffer.get(bytes);
+                dngCreator.writeImage( rawByteArrayOutputStreamArray[ pictureCounter ], tmpImage);
                 tmpImage.close();
+
                 pictureCounter++;
                 exposureMultiplier=1; // RESET exposureMultiplier every frame
 
@@ -297,9 +304,33 @@ public class Camera2BasicFragment extends Fragment
                     }
                 else
                     Log.e(TAG, "lightstage Outputstream not available");
+            } catch (IOException e) {
+                e.printStackTrace();
+            } finally {
+                saveRawLock.unlock();
+            }
+
+        }
+
+    };
+
+    private final ImageReader.OnImageAvailableListener mOnImageAvailableListener
+            = new ImageReader.OnImageAvailableListener() {
+
+        @Override
+        public void onImageAvailable(ImageReader reader) {
+            saveJpegLock.lock();
+            try {
+                Log.d(TAG, "OnImageAvailableListener: SAVING ");
+                Image tmpImage = reader.acquireNextImage();
+                ByteBuffer buffer = tmpImage.getPlanes()[0].getBuffer();
+                byte[] bytes = new byte[buffer.remaining()];
+                byteList.add(bytes);
+                buffer.get(bytes);
+                tmpImage.close();
             }
             finally {
-                saveImageLock.unlock();
+                saveJpegLock.unlock();
             }
 
         }
@@ -585,10 +616,20 @@ public class Camera2BasicFragment extends Fragment
                 CameraCharacteristics characteristics
                         = manager.getCameraCharacteristics(cameraId);
 
+
+
                 // We don't use a front facing camera in this sample.
                 Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
                 if (facing != null && facing == CameraCharacteristics.LENS_FACING_FRONT) {
                     continue;
+                }
+
+                if ( !contains(characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES),
+                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW) ) {
+                    Log.e(TAG,  "RAW Capture NOT supported");
+                }
+                else {
+                    Log.d(TAG,  "RAW Capture SUPPORTED");
                 }
 
                 StreamConfigurationMap map = characteristics.get(
@@ -598,13 +639,20 @@ public class Camera2BasicFragment extends Fragment
                 }
 
                 // For still image captures, we use the largest available size.
-                Size largest = Collections.max(
+                Size largestJpegImageSize = Collections.max(
                         Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)),
                         new CompareSizesByArea());
-                mImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
+                Size largestRawImageSize = Collections.max(
+                        Arrays.asList(map.getOutputSizes(ImageFormat.RAW_SENSOR)),
+                        new CompareSizesByArea());
+                mImageReader = ImageReader.newInstance(largestJpegImageSize.getWidth(), largestJpegImageSize.getHeight(),
                         ImageFormat.JPEG, /*maxImages*/1);
+                mRawImageReader = ImageReader.newInstance(largestRawImageSize.getWidth(), largestRawImageSize.getHeight(),
+                        ImageFormat.RAW_SENSOR, /*maxImages*/1);
                 mImageReader.setOnImageAvailableListener(
                         mOnImageAvailableListener, mBackgroundHandler);
+                mRawImageReader.setOnImageAvailableListener(
+                        mOnRawImageAvailableListener, mBackgroundHandler);
 
                 // Find out if we need to swap dimension to get the preview size relative to sensor
                 // coordinate.
@@ -656,7 +704,7 @@ public class Camera2BasicFragment extends Fragment
                 // garbage capture data.
                 mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class),
                         rotatedPreviewWidth, rotatedPreviewHeight, maxPreviewWidth,
-                        maxPreviewHeight, largest);
+                        maxPreviewHeight, largestJpegImageSize);
 
                 // We fit the aspect ratio of TextureView to the size of preview we picked.
                 int orientation = getResources().getConfiguration().orientation;
@@ -673,6 +721,8 @@ public class Camera2BasicFragment extends Fragment
                 mFlashSupported = available == null ? false : available;
 
                 mCameraId = cameraId;
+
+                mCameraCharacteristics = characteristics;
                 return;
             }
         } catch (CameraAccessException e) {
@@ -778,7 +828,7 @@ public class Camera2BasicFragment extends Fragment
             mPreviewRequestBuilder.addTarget(surface);
 
             // Here, we create a CameraCaptureSession for camera preview.
-            mCameraDevice.createCaptureSession(Arrays.asList(surface, mImageReader.getSurface()),
+            mCameraDevice.createCaptureSession(Arrays.asList(surface,mImageReader.getSurface(),mRawImageReader.getSurface()),
                     new CameraCaptureSession.StateCallback() {
 
                         @Override
@@ -888,10 +938,6 @@ public class Camera2BasicFragment extends Fragment
     }
 
 
-    /**
-     * Run the precapture sequence for capturing a still image. This method should be called when
-     * we get a response in {@link #mCaptureCallback} from {@link #lockFocus()}.
-     */
     private void runPrecaptureSequence() {
         try {
             // This is how to tell the camera to trigger.
@@ -906,11 +952,7 @@ public class Camera2BasicFragment extends Fragment
         }
     }
 
-    /**
-     * Capture a still picture. This method should be called when we get a response in
-     * {@link #mCaptureCallback} from both {@link #lockFocus()}.
-     */
-    // private float exposureTime=0.25f;
+
 
     private void captureStillPicture() {
         try {
@@ -922,6 +964,7 @@ public class Camera2BasicFragment extends Fragment
             final CaptureRequest.Builder captureRequestBuilder =
                     mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_MANUAL );
             captureRequestBuilder.addTarget(mImageReader.getSurface());
+            captureRequestBuilder.addTarget(mRawImageReader.getSurface());
 
             captureRequestBuilder.set(
                     CaptureRequest.CONTROL_AWB_MODE,
@@ -961,17 +1004,7 @@ public class Camera2BasicFragment extends Fragment
                                                @NonNull CaptureRequest request,
                                                @NonNull TotalCaptureResult result) {
 
-                    /*if (lightstageOutStream != null)
-                        try {
-                            Log.d(TAG, "signaling lightstage to continue");
-                            lightstageOutStream.writeByte( LIGHTSTAGE_CONTINUE_NEXT_LIGHT );
-
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-                    else
-                        Log.e(TAG, "lightstage Outputstream not available");
-                    */
+                    mCaptureResult[ pictureCounter ] = result; //RAW shizzle
                 }
             };
 
@@ -1068,18 +1101,22 @@ public class Camera2BasicFragment extends Fragment
 
 
         private void callDelayedImageSaver() {
-            saveImageLock.lock();
+            saveJpegLock.lock();
+            saveRawLock.lock();
             try {
                 // delayed write all frames:
                 for (int imgIdx = nextPictureToStartWith; imgIdx<pictureCounter; imgIdx++) {
                     mFile = new File(getActivity().getExternalFilesDir(null), pictureSession + "_" + String.format("%04d", imgIdx) + ".jpg");
                     mFileArray[imgIdx] = mFile;
+                    mFile = new File(getActivity().getExternalFilesDir(null), pictureSession + "_" + String.format("%04d", imgIdx) + ".dng");
+                    mRawFileArray[imgIdx] = mFile;
                 }
-                mBackgroundHandler.post(new DelayedImageSaver(mFileArray,nextPictureToStartWith, pictureCounter));
+                mBackgroundHandler.post(new DelayedImageSaver(mFileArray,mRawFileArray,nextPictureToStartWith, pictureCounter));
                 nextPictureToStartWith = pictureCounter;
             }
             finally {
-                saveImageLock.unlock();
+                saveJpegLock.unlock();
+                saveRawLock.unlock();
             }
         }
 
@@ -1353,7 +1390,7 @@ public class Camera2BasicFragment extends Fragment
         return clone;
     }
 
-    private static class DelayedImageSaver implements Runnable {
+    private class DelayedImageSaver implements Runnable {
 
         /**
          * The JPEG image array
@@ -1366,12 +1403,11 @@ public class Camera2BasicFragment extends Fragment
         /**
          * The file we save the image into - array
          */
-        private final File[] mFileArray;
+        private final File[] mFileArray, mRawFileArray;
 
-        DelayedImageSaver( File[] file, int nextPictureToStartWith, int imageCount) {
-            //mImageArray = image;
-            //bufferArray = buffers;
-            mFileArray = file;
+        DelayedImageSaver( File[] fileArray, File[] rawFileArray, int nextPictureToStartWith, int imageCount) {
+            mFileArray = fileArray;
+            mRawFileArray = rawFileArray;
             mNextPictureToStartWith=nextPictureToStartWith;
             mImageCount = imageCount;
         }
@@ -1380,13 +1416,23 @@ public class Camera2BasicFragment extends Fragment
         public void run() {
             for (int imgIdx=mNextPictureToStartWith;imgIdx<mImageCount;imgIdx++) {
                 File mFile=mFileArray[imgIdx];
-                FileOutputStream output = null;
+                File mRawFile=mRawFileArray[imgIdx];
+                FileOutputStream jpegOutput = null;
+                FileOutputStream rawFileOutputStream = null;
+
 
                 try {
-                    output = new FileOutputStream(mFile);
-                    output.write( byteList.get(imgIdx) );
+                    // write jpeg
+                    jpegOutput = new FileOutputStream(mFile);
+                    jpegOutput.write( byteList.get(imgIdx) );
                     byteList.set( imgIdx, null ); // clear the element, but do not remove it
                     Log.d(TAG, "cleared image: " + Integer.toString(imgIdx));
+
+                    //write RAW
+                    rawFileOutputStream = new FileOutputStream(mRawFile);
+                    rawByteArrayOutputStreamArray[imgIdx].writeTo(rawFileOutputStream);
+                    rawFileOutputStream.close();
+                    rawByteArrayOutputStreamArray[imgIdx].close();
                 } catch (IOException e) {
                     e.printStackTrace();
                     Log.d(TAG, "something went wrong during file save");
@@ -1396,9 +1442,9 @@ public class Camera2BasicFragment extends Fragment
                         e1.printStackTrace();
                     }
                 } finally {
-                    if (null != output) {
+                    if (null != jpegOutput) {
                         try {
-                            output.close();
+                            jpegOutput.close();
                         } catch (IOException e) {
                             e.printStackTrace();
                         }
@@ -1487,6 +1533,15 @@ public class Camera2BasicFragment extends Fragment
         }
     }
 
-    private class tellPiToShoot {
+    private static Boolean contains( int [] modes, int mode ){
+        if (modes == null) {
+            return false;
+        }
+        for (int i : modes ) {
+            if (i == mode)
+                return true;
+            // Log.d(TAG, "MODE: " + Integer.toString(i));
+        }
+        return false;
     }
 }
