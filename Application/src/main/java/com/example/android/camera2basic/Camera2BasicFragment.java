@@ -268,7 +268,7 @@ public class Camera2BasicFragment extends Fragment
     private ByteArrayOutputStream[] rawByteArrayOutputStreamArray = new ByteArrayOutputStream[99];
 
     private CameraCharacteristics mCameraCharacteristics;
-    private CaptureResult[] mCaptureResult = new CaptureResult[99];
+    private CaptureResult mCaptureResult;
 
     private final ReentrantLock saveJpegLock = new ReentrantLock();
     private final ReentrantLock saveRawLock = new ReentrantLock();
@@ -286,9 +286,15 @@ public class Camera2BasicFragment extends Fragment
             saveRawLock.lock();
             try {
                 Log.d(TAG, "OnRawImageAvailableListener: SAVING ");
-                DngCreator dngCreator = new DngCreator( mCameraCharacteristics, mCaptureResult[ pictureCounter ] );
+                if (mCaptureResult == null)
+                    Log.e(TAG, "captureResult is null");
+                if (mCameraCharacteristics == null)
+                    Log.e(TAG, "mCameraCharacteristics is null");
+                DngCreator dngCreator = new DngCreator( mCameraCharacteristics, mCaptureResult );
                 Image tmpImage = reader.acquireNextImage();
-                dngCreator.writeImage( rawByteArrayOutputStreamArray[ pictureCounter ], tmpImage);
+                ByteArrayOutputStream tmpOutputStream=new ByteArrayOutputStream();
+                dngCreator.writeImage( tmpOutputStream, tmpImage);
+                rawByteArrayOutputStreamArray[ pictureCounter ] = tmpOutputStream;
                 tmpImage.close();
 
                 pictureCounter++;
@@ -1004,13 +1010,20 @@ public class Camera2BasicFragment extends Fragment
                                                @NonNull CaptureRequest request,
                                                @NonNull TotalCaptureResult result) {
 
-                    mCaptureResult[ pictureCounter ] = result; //RAW shizzle
+
+                    if (result==null)
+                        Log.e(TAG, "onCaptureCompleted: capture result NULL");
+                    else
+                        Log.d(TAG, "onCaptureCompleted: capture result VALID");
+                    mCaptureResult = result; //RAW shizzle
+                    saveRawLock.unlock();
                 }
             };
 
             mCaptureSession.stopRepeating();
             //mCaptureSession.abortCaptures();
             //mCaptureSession.close(); // instead of capture
+            saveRawLock.lock();
             mCaptureSession.capture(captureRequestBuilder.build(), CaptureCallback, null);
         } catch (CameraAccessException e) {
             e.printStackTrace();
@@ -1221,6 +1234,11 @@ public class Camera2BasicFragment extends Fragment
 
                 boolean pmd_recording=false;
                 while (true) {
+                    if (pictureCounter-nextPictureToStartWith > 8) {
+                        Log.d(TAG, "TOO many images in RAM - callDelayedImageSaver");
+                        callDelayedImageSaver();
+                    }
+
                     int messageFromLightstage = lightstageInputStream.readByte();
 
                     if (messageFromLightstage == messageCodes.ANDROID_START_CAPTURE.getCode() ) {
@@ -1232,9 +1250,7 @@ public class Camera2BasicFragment extends Fragment
                         }
 
                         try {
-                            // Log.d( TAG, "taking picture " + String.format("%04d", pictureCounter));
-                            Log.d( TAG, "taking picture..." );
-                            //Thread.sleep(100); // stupid hack
+                            Log.d( TAG, "taking picture: " + String.format("%04d", pictureCounter));
                             takePicture();
                         }
                         catch (Exception e) {
@@ -1259,6 +1275,7 @@ public class Camera2BasicFragment extends Fragment
                         // intermediate writing of frames because lightstage does some physical
                         // movemnet which gives us some time to do something useful to prevent
                         // running out of memory
+                        Log.d( TAG, "LIGHTSTAGE_POLARIZER_STARTS_ROTATING - callDelayedImageSaver");
                         callDelayedImageSaver();
                         lightstageOutStream.writeByte(messageCodes.ANDROID_FINISHED_WRITING_IMAGES.getCode());
 
@@ -1426,18 +1443,21 @@ public class Camera2BasicFragment extends Fragment
                     jpegOutput = new FileOutputStream(mFile);
                     jpegOutput.write( byteList.get(imgIdx) );
                     byteList.set( imgIdx, null ); // clear the element, but do not remove it
-                    Log.d(TAG, "cleared image: " + Integer.toString(imgIdx));
+                    Log.d(TAG, "cleared JPG image: " + Integer.toString(imgIdx));
 
                     //write RAW
                     rawFileOutputStream = new FileOutputStream(mRawFile);
                     rawByteArrayOutputStreamArray[imgIdx].writeTo(rawFileOutputStream);
                     rawFileOutputStream.close();
                     rawByteArrayOutputStreamArray[imgIdx].close();
+                    rawByteArrayOutputStreamArray[imgIdx]=null;
+                    Log.d(TAG, "cleared RAW image: " + Integer.toString(imgIdx));
                 } catch (IOException e) {
+                    Log.d( TAG, messageCodes.ANDROID_ERROR_SAVING_PICTURE.getDescription() );
+                    showToast( e.getMessage() );
                     e.printStackTrace();
-                    Log.d(TAG, "something went wrong during file save");
                     try {
-                        lightstageOutStream.writeByte(-2);
+                        lightstageOutStream.writeByte(messageCodes.ANDROID_ERROR_SAVING_PICTURE.getCode());
                     } catch (IOException e1) {
                         e1.printStackTrace();
                     }

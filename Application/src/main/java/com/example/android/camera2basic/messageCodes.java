@@ -11,6 +11,7 @@ public enum messageCodes {
     ANDROID_FINISHED_WRITING_IMAGES(5,""),
     ANDROID_ADJUST_EXPOURE(6,""),
     ANDROID_ERROR_TAKING_PICTURE(-2,"error taking picture"),
+    ANDROID_ERROR_SAVING_PICTURE(-3,"error saving picture"),
 
     LIGHTSTAGE_CONTINUE_NEXT_LIGHT(3,""),
     LIGHTSTAGE_POLARIZER_STARTS_ROTATING(4,""),
