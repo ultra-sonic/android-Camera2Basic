@@ -69,7 +69,6 @@ import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
@@ -84,6 +83,8 @@ import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+
+import static java.lang.Math.pow;
 
 public class Camera2BasicFragment extends Fragment
         implements View.OnClickListener, ActivityCompat.OnRequestPermissionsResultCallback {
@@ -188,7 +189,8 @@ public class Camera2BasicFragment extends Fragment
 
     private EditText hostAdressView;
 
-    private SeekBar seekBarView;
+    private SeekBar focusSeekBarView,
+                    exposureSeekBarView;
 
     private Spinner shotModeSpinnerView;
 
@@ -298,7 +300,7 @@ public class Camera2BasicFragment extends Fragment
                 tmpImage.close();
 
                 pictureCounter++;
-                exposureMultiplier=1; // RESET exposureMultiplier every frame
+                perShotExposureMultiplier =1; // RESET perShotExposureMultiplier every frame
 
                 if (lightstageOutStream != null)
                     try {
@@ -529,6 +531,7 @@ public class Camera2BasicFragment extends Fragment
     }
 
     private float focusDistance=3.3f;
+    private int globalExposure = 0;
 
     @Override
     public void onViewCreated(final View view, Bundle savedInstanceState) {
@@ -536,10 +539,11 @@ public class Camera2BasicFragment extends Fragment
         view.findViewById(R.id.info).setOnClickListener(this);
         mTextureView = (AutoFitTextureView) view.findViewById(R.id.texture);
         hostAdressView = (EditText) view.findViewById(R.id.hostAddress);
-        seekBarView = (SeekBar) view.findViewById(R.id.seekBar );
+        focusSeekBarView = (SeekBar) view.findViewById(R.id.focusSeekBar);
+        exposureSeekBarView = (SeekBar) view.findViewById(R.id.exposureSeekBar );
         shotModeSpinnerView = (Spinner)  view.findViewById(R.id.shotModeSpinner );
 
-        seekBarView.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        focusSeekBarView.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override
@@ -558,6 +562,18 @@ public class Camera2BasicFragment extends Fragment
                 } catch (CameraAccessException e) {
                     e.printStackTrace();
                 }
+            }
+        });
+
+        exposureSeekBarView.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                globalExposure = progress;
+                Log.d( TAG, "setting globalExposure: " + Integer.toString( globalExposure ) );
             }
         });
     }
@@ -982,11 +998,10 @@ public class Camera2BasicFragment extends Fragment
                     (int) (200)); // *isoBooster
             // setExposureTime(captureBuilder); // , exposureTime);
 
-            Log.d(TAG, "Exposure muliplier: " + Integer.toString( exposureMultiplier ));
+            Log.d(TAG, "Exposure muliplier: " + Integer.toString(perShotExposureMultiplier));
             captureRequestBuilder.set(
                     CaptureRequest.SENSOR_EXPOSURE_TIME,
-                    // (long) exposureTimeInSeconds*1000000000 );
-                    (long)(200000000L * exposureMultiplier ) ); // /isoBooster
+                    (long)(200000000L * perShotExposureMultiplier * pow(2,globalExposure) ) ); // /isoBooster
             // 500000000L = 0.5 seconds
 
             //Set the JPEG quality here like so
@@ -1107,7 +1122,7 @@ public class Camera2BasicFragment extends Fragment
     private int nextPictureToStartWith =0;
     private String pictureSession;
 
-    private int exposureMultiplier=1;
+    private int perShotExposureMultiplier =1;
 
 
     private class initiateRemoteControlFromPi extends AsyncTask<String, Void, String> {
@@ -1137,11 +1152,31 @@ public class Camera2BasicFragment extends Fragment
         protected String doInBackground(String... params) {
 
             String hostname = hostAdressView.getText().toString();
-            //String hostname = "lightstage"; // TODO: put hostname into UI - and remember the last one used
             Socket lightstageClientSocket = null;
             int lightStagePort=50007;
             Socket pmdClientSocket = null;
             int pmdPort=50008;
+
+            pictureSession = getCurrentTimeStamp();
+            Log.d(TAG, "timestamp: " + pictureSession );
+            pictureCounter=0;
+            byteList.clear();
+
+            // init lightstage shotmode
+            String shotMode = String.valueOf( shotModeSpinnerView.getSelectedItem() );
+            /*
+            if (shotMode.startsWith( "do nothing - just shoot" )) {
+                takePicture();
+                callDelayedImageSaver();
+                backToPreviewState();
+                Log.d( TAG,"clean exit");
+                return null;
+            }
+            else {
+                Log.d(TAG, "shotMode: " + shotMode);
+            }
+            */
+
 
 
 
@@ -1168,8 +1203,6 @@ public class Camera2BasicFragment extends Fragment
                 lightstageOutStream = new DataOutputStream(lightstageClientSocket.getOutputStream());
                 lightstageInputStream = new DataInputStream(lightstageClientSocket.getInputStream());
 
-                // init lightstage shotmode and send first message
-                String shotMode = String.valueOf( shotModeSpinnerView.getSelectedItem() );
                 // INIT LIGHTSTAGE
                 Integer welcomeMessage=-1;
                 switch (shotMode) {
@@ -1227,10 +1260,6 @@ public class Camera2BasicFragment extends Fragment
                     }
                 }
 
-                pictureSession = getCurrentTimeStamp();
-                Log.d(TAG, "timestamp: " + pictureSession );
-                pictureCounter=0;
-                byteList.clear();
 
                 boolean pmd_recording=false;
                 while (true) {
@@ -1267,9 +1296,9 @@ public class Camera2BasicFragment extends Fragment
                             }
                         }
                     } else if (messageFromLightstage == messageCodes.ANDROID_ADJUST_EXPOURE.getCode() ) {
-                        exposureMultiplier = lightstageInputStream.readByte();
+                        perShotExposureMultiplier = lightstageInputStream.readByte();
                         //ACKNOLEDGE TO LIGHTSTAGE with same message
-                        lightstageOutStream.writeByte( exposureMultiplier );
+                        lightstageOutStream.writeByte(perShotExposureMultiplier);
 
                     } else if (messageFromLightstage == messageCodes.LIGHTSTAGE_POLARIZER_STARTS_ROTATING.getCode() ) {
                         // intermediate writing of frames because lightstage does some physical
