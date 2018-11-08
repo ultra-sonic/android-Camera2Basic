@@ -20,6 +20,7 @@
     <string name="camera_error">This device doesn\'t support Camera2 API.</string>
     <string name="connect">connect</string>
     <string name="hostAddressString">192.168.43.203</string>
+    <string name="autofocus">autofocus</string>
 
     <string-array name="shooting_mode_array">
         <item>single shot</item>
