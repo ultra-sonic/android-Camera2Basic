@@ -66,6 +66,7 @@ import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.SeekBar;
 import android.widget.Spinner;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.ByteArrayOutputStream;
@@ -198,6 +199,7 @@ public class Camera2BasicFragment extends Fragment
 
     private SeekBar focusSeekBarView,
                     exposureSeekBarView;
+    private TextView focusDistanceView;
 
     private Spinner shotModeSpinnerView;
     private boolean mManualFocusEngaged;
@@ -296,10 +298,14 @@ public class Camera2BasicFragment extends Fragment
             saveRawLock.lock();
             try {
                 Log.d(TAG, "OnRawImageAvailableListener: SAVING ");
-                if (mCaptureResult == null)
-                    Log.e(TAG, "captureResult is null");
-                if (mCameraCharacteristics == null)
-                    Log.e(TAG, "mCameraCharacteristics is null");
+                if (mCaptureResult == null) {
+                    // Log.e(TAG, "captureResult is null");
+                    throw new IOException("captureResult is null");
+                }
+                if (mCameraCharacteristics == null) {
+                    // Log.e(TAG, "mCameraCharacteristics is null");
+                    throw new IOException("mCameraCharacteristics is null");
+                }
                 DngCreator dngCreator = new DngCreator( mCameraCharacteristics, mCaptureResult );
                 Image tmpImage = reader.acquireNextImage();
                 ByteArrayOutputStream tmpOutputStream=new ByteArrayOutputStream();
@@ -538,7 +544,8 @@ public class Camera2BasicFragment extends Fragment
         return inflater.inflate(R.layout.fragment_camera2_basic, container, false);
     }
 
-    private float mFocusDistance =3.3f;
+
+    private float mFocusDistance = 4.75f;
     private int globalExposure = 0;
 
 
@@ -588,6 +595,8 @@ public class Camera2BasicFragment extends Fragment
         mTextureView = (AutoFitTextureView) view.findViewById(R.id.texture);
         hostAdressView = (EditText) view.findViewById(R.id.hostAddress);
         focusSeekBarView = (SeekBar) view.findViewById(R.id.focusSeekBar);
+        focusDistanceView = (TextView) view.findViewById(R.id.focusDistance);
+
         exposureSeekBarView = (SeekBar) view.findViewById(R.id.exposureSeekBar );
         shotModeSpinnerView = (Spinner)  view.findViewById(R.id.shotModeSpinner );
 
@@ -616,6 +625,8 @@ public class Camera2BasicFragment extends Fragment
                     Log.d(TAG, "distance: " + Float.toString(distance));
 
                     mFocusDistance -= (distance / 1000) ; // pos 0=3.3f for faces - pos4=1.5f for sweethearts radkappe
+                    focusDistanceView.setText( String.format("%.2f", mFocusDistance) );
+
                     setZoom(false);
                     Log.d(TAG, "setting LENS_FOCUS_DISTANCE for PREVIEW: " + Float.toString(mFocusDistance));
                     mPreviewRequestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, mFocusDistance);
@@ -643,7 +654,12 @@ public class Camera2BasicFragment extends Fragment
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 setZoom(true);
-                mFocusDistance = (3.3f - ((float)progress) * 0.45f / 1.5f ); // pos 0=3.3f for faces - pos4=1.5f for sweethearts radkappe
+                // ZENFONE mFocusDistance = (3.3f - ((float)progress) * 0.45f / 1.5f ); // pos 0=3.3f for faces - pos4=1.5f for sweethearts radkappe
+
+                // G4 IVY SCAN - 4.75 was good
+                mFocusDistance = (4.75f - ((float)progress) * 0.45f / 1.5f ); // pos 0=3.3f for faces - pos4=1.5f for sweethearts radkappe
+                focusDistanceView.setText( String.format("%.2f", mFocusDistance) );
+
                 Log.d(TAG, "setting LENS_FOCUS_DISTANCE for PREVIEW: " + Float.toString(mFocusDistance));
                 mPreviewRequestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, mFocusDistance);
                 mPreviewRequest = mPreviewRequestBuilder.build();
@@ -968,7 +984,8 @@ public class Camera2BasicFragment extends Fragment
                                         CaptureRequest.CONTROL_AF_MODE,
                                         CaptureRequest.CONTROL_AF_MODE_OFF);
                                 mPreviewRequestBuilder.set(
-                                        CaptureRequest.LENS_FOCUS_DISTANCE, 3.3f ); // 3.3f for faces - 1.5f for sweethearts radkappe - 0f sets focus to infinity
+                                        CaptureRequest.LENS_FOCUS_DISTANCE, mFocusDistance );
+                                focusDistanceView.setText( String.format("%.2f", mFocusDistance) );
 
                                 mPreviewRequestBuilder.set(
                                         CaptureRequest.CONTROL_AWB_MODE,
@@ -1116,7 +1133,7 @@ public class Camera2BasicFragment extends Fragment
                     CaptureRequest.JPEG_QUALITY,
                     quality );
 
-            Log.d(TAG, "setting LENS_FOCUS_DISTANCE for CAPTURE: " + Float.toString(mFocusDistance));
+            // Log.d(TAG, "setting LENS_FOCUS_DISTANCE for CAPTURE: " + Float.toString(mFocusDistance));
             captureRequestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, mFocusDistance);
 
             // Orientation
